@@ -1,5 +1,6 @@
 #include "session.h"
 #include "media.h"
+#include <QCoreApplication>
 #include <QNetworkReply>
 #include <QNetworkCookieJar>
 #include <QNetworkCookie>
@@ -56,18 +57,19 @@ void Session::resetTransport() {
     deadline.stop(); heartbeat.stop(); nextFrame.stop();
     if(reply) { reply->disconnect(this); reply->abort(); reply->deleteLater(); reply=nullptr; }
     if(socket) { socket->disconnect(this); socket->abort(); socket->deleteLater(); socket=nullptr; }
-    if(webAuthenticated && !keepMedia && !established) {
-        // Separate manager keeps logout cookies alive without holding up a new connection.
-        auto *logout=new QNetworkAccessManager(this);
-        auto *jar=new QNetworkCookieJar(logout);
-        jar->setCookiesFromUrl(web.cookieJar()->cookiesForUrl(baseUrl),baseUrl);
-        logout->setCookieJar(jar);
-        QNetworkRequest request(baseUrl.resolved(QUrl("/cgi/logout.cgi")));
-        request.setTransferTimeout(3000);
-        auto *r=logout->get(request);
-        const bool trust=allowUntrusted;
-        connect(r,&QNetworkReply::sslErrors,logout,[r,trust](const QList<QSslError>&){if(trust) r->ignoreSslErrors();});
-        connect(r,&QNetworkReply::finished,logout,&QObject::deleteLater);
+    if(webAuthenticated) {
+        const auto cookies=web.cookieJar()->cookiesForUrl(baseUrl);
+        const auto url=baseUrl;const bool trust=allowUntrusted;
+        auto logout=[cookies,url,trust] {
+            // Survive closing a tab long enough to finish its bounded logout request.
+            auto *manager=new QNetworkAccessManager(QCoreApplication::instance());
+            auto *jar=new QNetworkCookieJar(manager);jar->setCookiesFromUrl(cookies,url);manager->setCookieJar(jar);
+            QNetworkRequest request(url.resolved(QUrl("/cgi/logout.cgi")));request.setTransferTimeout(3000);
+            auto *r=manager->get(request);
+            QObject::connect(r,&QNetworkReply::sslErrors,manager,[r,trust](const QList<QSslError>&){if(trust) r->ignoreSslErrors();});
+            QObject::connect(r,&QNetworkReply::finished,manager,&QObject::deleteLater);
+        };
+        if(keepMedia) deferredLogouts.append(logout);else logout();
         webAuthenticated=false;
     }
     web.setCookieJar(new QNetworkCookieJar(&web));
@@ -94,7 +96,7 @@ void Session::open(const QVariantMap &o) {
 void Session::startAttempt(const QVariantMap &o) {
     try {
         allowUntrusted=o.value("allowUntrusted",true).toBool(); switchJava=o.value("switchJava").toBool();
-        frameInterval=qBound(0,o.value("frameInterval",0).toInt(),1000);
+        // Streaming cadence is controlled by the View menu and survives reconnects.
         launch.host=o.value("host").toString().trimmed();
         if(launch.host.contains("://")) launch.host=QUrl(launch.host).host();
         else {if(launch.host.contains('/')) launch.host=launch.host.section('/',0,0);
@@ -377,5 +379,13 @@ namespace aten {
 void Session::setAutoReconnect(bool enabled,const QVariantMap &options) {
     if(enabled && options.value("autoArm",true).toBool()) reconnectOptions=options;
     else {reconnectOptions.clear();if(phase==Phase::Reconnecting) close();}
+}
+}
+
+namespace aten {
+Session::~Session() {setKeepMedia(false);close();}
+void Session::setKeepMedia(bool value) {
+    keepMedia=value;
+    if(!value) {const auto pending=std::move(deferredLogouts);deferredLogouts.clear();for(const auto &logout:pending) logout();}
 }
 }

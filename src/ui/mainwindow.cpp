@@ -81,7 +81,7 @@ MainWindow::Tab *MainWindow::addTab(const QString &name) {
     connect(t->session,&aten::Session::diagnostic,this,[this,t](const QString &s){log->write("["+t->name+"] "+s);});
     connect(t->session,&aten::Session::unsupportedFrame,log,&aten::DebugLog::capture);
     connect(t->media,&aten::Media::diagnostic,this,[this,t](const QString &s){log->write("["+t->name+"] "+s);});
-    connect(t->media,&aten::Media::changed,this,[this,t]{t->session->keepMedia=t->media->busy();updateTabs();});
+    connect(t->media,&aten::Media::changed,this,[this,t]{t->session->setKeepMedia(t->media->busy());updateTabs();});
     connect(console,&Console::isoDropped,this,&MainWindow::mountIso);
     tabs->setCurrentIndex(tabs->addTab(scroll,name.isEmpty()?"New session":name));
     t->session->setDisplay(quality,mode);applyPreferences();return t;

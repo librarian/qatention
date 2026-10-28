@@ -76,7 +76,7 @@ int main(int argc,char **argv) {
             auto e=endpoint.host.isEmpty()?session.mediaEndpoint():endpoint;
             if(parser.isSet("vmedia-host")) e.host=parser.value("vmedia-host");
             if(mediaPort) e.mediaPort=quint16(mediaPort);if(parser.isSet("vmedia-plain")) e.tls=false;
-            started=true;session.keepMedia=true;media.mount(e,!parser.isSet("verify-cert"),parser.value("mount-iso"));
+            started=true;session.setKeepMedia(true);media.mount(e,!parser.isSet("verify-cert"),parser.value("mount-iso"));
         };
         QObject::connect(&media,&aten::Media::changed,&app,[&]{
             std::cerr<<media.status().toStdString()<<"\n";

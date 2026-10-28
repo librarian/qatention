@@ -9,6 +9,7 @@
 #include <QElapsedTimer>
 #include <QSet>
 #include <QVariantMap>
+#include <functional>
 
 namespace aten {
 class Session : public QObject {
@@ -18,6 +19,8 @@ class Session : public QObject {
     Q_PROPERTY(QString status READ status NOTIFY stateChanged)
 public:
     explicit Session(QObject *parent=nullptr);
+    ~Session() override;
+    void setKeepMedia(bool value);
     bool busy() const { return phase!=Phase::Idle; }
     bool connected() const { return phase==Phase::Messages; }
     QString status() const { return statusText; }
@@ -38,7 +41,7 @@ public:
     QString information() const;
     QStringList users() const { return sessionUsers; }
     int hostPower() const { return powerState; }
-    bool keepMedia=false;
+
     void pointer(int x,int y,int buttons);
 signals:
     void videoPacket(const QByteArray &packet,quint32 encoding);
@@ -49,6 +52,8 @@ signals:
     void clearFrame();
 private:
     enum class Phase { Idle, Reconnecting, Web, Connecting, Banner, Security, Challenge, Auth, Init, Messages };
+    bool keepMedia=false;
+    QList<std::function<void()>> deferredLogouts;
     Phase phase=Phase::Idle;
     QString statusText="Disconnected", tlsFailure;
     QPointer<QSslSocket> socket;
