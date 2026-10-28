@@ -1,0 +1,8 @@
+/build*/
+/dist/
+*.user
+*.log
+*.jnlp
+*.bmp
+*.deb
+.DS_Store

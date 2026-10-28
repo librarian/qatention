@@ -1,0 +1,87 @@
+name: Desktop builds
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            arch: linux_gcc_64
+            label: linux-x64
+          - os: windows-2022
+            arch: win64_msvc2022_64
+            label: windows-x64
+          - os: macos-15-intel
+            arch: clang_64
+            label: macos-x64
+          - os: macos-15
+            arch: clang_64
+            label: macos-arm64
+    runs-on: ${{ matrix.os }}
+    env:
+      QT_QPA_PLATFORM: offscreen
+      QT_QUICK_BACKEND: software
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libfontconfig1-dev libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-image0 libxcb-render-util0
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: ${{ matrix.arch }}
+          cache: true
+      - name: Configure
+        shell: bash
+        run: |
+          args=()
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            args+=(-DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl)
+          fi
+          if [[ "${{ matrix.label }}" == "macos-arm64" ]]; then
+            args+=(-DCMAKE_OSX_ARCHITECTURES=arm64)
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            args+=(-DCMAKE_OSX_ARCHITECTURES=x86_64)
+          fi
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release "${args[@]}"
+      - name: Build
+        run: cmake --build build --parallel 3
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Package runtime
+        run: cmake --install build --prefix "${{ github.workspace }}/dist"
+      - name: Include Qt licenses
+        shell: bash
+        run: |
+          mkdir -p dist/licenses/qt
+          for name in LGPL-3.0-only GPL-3.0-only; do
+            curl --fail --location "https://raw.githubusercontent.com/qt/qtbase/v6.8.3/LICENSES/$name.txt" -o "dist/licenses/qt/$name.txt"
+          done
+      - name: Test installed application
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            dist/qatention.app/Contents/MacOS/qatention --smoke-test
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            dist/bin/qatention.exe --smoke-test
+          else
+            dist/bin/qatention --smoke-test
+          fi
+      - name: Archive
+        shell: bash
+        run: tar -czf "qatention-${{ matrix.label }}.tar.gz" -C dist .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qatention-${{ matrix.label }}
+          path: qatention-${{ matrix.label }}.tar.gz
+          if-no-files-found: error
