@@ -1,7 +1,7 @@
 # QATENtion
 
 A C++17 / Qt 6 Widgets port of [ATENtion](https://github.com/librarian/ATENtion).
-Windows x64 and Linux x64 builds both run on Linux. macOS builds remain deferred.
+Windows x64, Linux x64, and macOS Intel/Apple Silicon cross-builds run on Linux.
 
 ## Desktop features
 
@@ -69,7 +69,7 @@ using Linux runners for both targets: Linux builds natively; Windows cross-compi
 with MinGW and uses Wine for the protocol tests and installed UI/TLS smoke test.
 Wine validation does not replace interactive Windows hardware testing.
 The Windows package bundles OpenSSL built with MinGW, requiring no MSVC runtime.
-macOS jobs are disabled.
+macOS cross-builds run in a separate Linux-hosted workflow.
 The workflow is also runnable manually from GitHub Actions.
 
 ## Connect and saved credentials
@@ -150,3 +150,18 @@ and the installed UI/TLS smoke test. CI caches the Windows SDK and OpenSSL build
 
 The ASPEED decoder remains C with a C++ ownership wrapper. No .NET runtime or
 separate decoder DLL is required. See [THIRD_PARTY.md](THIRD_PARTY.md).
+
+## macOS cross-build previews
+
+The macOS cross-build workflow uses pinned osxcross, LLVM, a checksum-verified
+macOS 14.5 SDK snapshot, Qt 6.8.3 and rcodesign. Packages target macOS 12 or newer.
+It builds separate arm64 (Apple Silicon) and x86_64 (Intel) ZIPs on Ubuntu.
+
+Extract and open qatention.app. The bundles have ad-hoc code signatures, without
+Developer ID signing or notarization. macOS may require Privacy & Security >
+Open Anyway after the first launch attempt. The ZIP includes MACOS-TESTING.txt.
+The CLI is inside qatention.app/Contents/MacOS/qatention-capture.
+
+CI checks architectures, bundled library dependencies, signatures and symlinks;
+it cannot run the macOS application. Login, TLS, video, input and media need testing
+on a Mac. macOS currently stores profile credentials in owner-readable JSON.

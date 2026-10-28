@@ -29,7 +29,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libfontconfig1-dev libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-image0 libxcb-render-util0
       - name: Windows cross-build dependencies
         if: matrix.target == 'windows-x64'
-        run: sudo apt-get install -y g++-mingw-w64-x86-64-posix wine64 wine
+        run: sudo apt-get install -y g++-mingw-w64-x86-64-posix wine64 wine xvfb xauth
       - uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.3'
@@ -68,7 +68,7 @@ jobs:
         run: cmake --install build --prefix "$PWD/dist"
       - name: Deploy and test Windows package under Wine
         if: matrix.target == 'windows-x64'
-        run: python scripts/package_windows.py --qt qt-windows/6.8.3/mingw_64 --openssl openssl-windows --build build --dest dist
+        run: xvfb-run -a python scripts/package_windows.py --qt qt-windows/6.8.3/mingw_64 --openssl openssl-windows --build build --dest dist
       - name: Include MinGW licenses
         if: matrix.target == 'windows-x64'
         run: |

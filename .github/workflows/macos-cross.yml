@@ -1,0 +1,73 @@
+name: macOS cross-builds
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-cross-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x86_64]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Cross-build dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build clang llvm lld make patch xz-utils bzip2 cpio libgl1-mesa-dev libxkbcommon-dev
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: linux_gcc_64
+          cache: true
+      - name: Cache macOS toolchain and Qt
+        uses: actions/cache@v5
+        id: mac-cache
+        with:
+          path: |
+            osxcross
+            qt-macos
+          key: ubuntu24-osxcross27d21e4-sdk14.5-qt6.8.3-rcodesign0.29-v1
+      - name: Prepare cross-toolchain and macOS Qt
+        if: steps.mac-cache.outputs.cache-hit != 'true'
+        run: |
+          bash scripts/setup_macos_cross.sh "$PWD/osxcross" "$RUNNER_TEMP/macos-build"
+          python -m pip install aqtinstall==3.3.0
+          python -m aqt install-qt mac desktop 6.8.3 clang_64 -O qt-macos --archives qtbase qtsvg
+      - name: Configure
+        run: |
+          export PATH="$PWD/osxcross/bin:$PATH"
+          ${{ matrix.arch }}-apple-darwin23.5-cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
+            "-DCMAKE_PREFIX_PATH=$PWD/qt-macos/6.8.3/macos" \
+            "-DQT_HOST_PATH=$QT_ROOT_DIR"
+      - name: Build and install
+        run: |
+          export PATH="$PWD/osxcross/bin:$PATH"
+          cmake --build build --parallel 3
+          cmake --install build --prefix "$PWD/dist"
+      - name: Bundle, sign and verify dependencies
+        run: |
+          export PATH="$PWD/osxcross/bin:$PATH"
+          python scripts/package_macos.py --qt qt-macos/6.8.3/macos --dest dist --tools osxcross/bin --arch ${{ matrix.arch }}
+      - name: Include Qt licenses
+        run: |
+          mkdir -p dist/licenses/qt
+          for name in LGPL-3.0-only GPL-3.0-only; do
+            curl --fail --location "https://raw.githubusercontent.com/qt/qtbase/v6.8.3/LICENSES/$name.txt" -o "dist/licenses/qt/$name.txt"
+          done
+      - name: Create ZIP
+        run: python scripts/archive.py dist qatention-macos-${{ matrix.arch }}.zip
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          path: qatention-macos-${{ matrix.arch }}.zip
+          archive: false
+          if-no-files-found: error

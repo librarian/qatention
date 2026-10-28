@@ -24,7 +24,7 @@ codec and CLI behavior were compared with the corresponding original sources.
 
 - Qt styling replaces WPF styling. Linux integration depends on available Qt platform themes.
 - Relative/single mouse modes remain disabled, as in the reference application.
-- Linux credentials use owner-readable JSON; Windows passwords use DPAPI.
+- Linux/macOS credentials use owner-readable JSON; Windows passwords use DPAPI.
 - Profile identity/restoration currently uses names, rather than ATENtion's GUIDs.
 - Session information reports average FPS and bytes since connection, rather than rolling rates.
 - Rendering uses complete QImages and a single outstanding framebuffer request;
@@ -33,7 +33,7 @@ codec and CLI behavior were compared with the corresponding original sources.
 - Media transfer and decoder work run on the Qt event loop with bounded allocations.
 - With web authentication, CLI media mode first connects the console; a supplied JNLP
   can mount media directly without opening video.
-- macOS and Android builds are not enabled.
+- macOS cross-build previews require on-device validation; Android is not enabled.
 
 ## Validation boundary
 

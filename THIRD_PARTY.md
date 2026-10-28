@@ -32,3 +32,10 @@ checksum-verified upstream source using MinGW. Its license is included under
 `licenses/OpenSSL.txt`. Source: https://github.com/openssl/openssl/tree/openssl-3.5.9 .
 MinGW GCC runtime libraries use the GCC Runtime Library Exception; their copyright
 and exception text, the MinGW-w64 notices, and GPLv3 are included under `licenses/`.
+
+macOS cross-build tooling uses osxcross commit
+27d21e4977c9751d01199c7a226a6faf494c3dd9 and the macOS 14.5 SDK snapshot from
+https://github.com/joseluisq/macosx-sdks/releases/tag/14.5 (SHA256 pinned in the
+setup script). Apple SDKs retain Apple's license; the SDK is a build input and
+is not included in application ZIPs. rcodesign 0.29.0 creates ad-hoc signatures
+on Linux; it is also a build tool and is not included in application ZIPs.

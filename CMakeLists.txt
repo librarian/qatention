@@ -36,6 +36,9 @@ set_target_properties(qatention PROPERTIES
     MACOSX_BUNDLE_BUNDLE_NAME QATENtion
     MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
     MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION})
+if(APPLE)
+    set_target_properties(qatention qatention-capture PROPERTIES INSTALL_RPATH "@executable_path/../Frameworks")
+endif()
 install(TARGETS qatention BUNDLE DESTINATION . RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 # Retain the headless platform so installed packages can run the same UI/TLS smoke test.
 if(APPLE)
