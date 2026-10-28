@@ -78,7 +78,10 @@ while queue:
         else:
             raise RuntimeError(f'{binary}: unexpected external dependency {dependency}')
 
-(resources / 'qt.conf').write_text('[Paths]\nPrefix=..\nPlugins=PlugIns\n')
+# Qt resolves a bundle's Prefix relative to Contents, not Contents/MacOS.
+(resources / 'qt.conf').write_text('[Paths]\nPrefix=.\nPlugins=PlugIns\n')
+# Fallback for the CLI if CoreFoundation does not recognize it as the main bundle.
+(contents / 'MacOS/qt.conf').write_text('[Paths]\nPrefix=..\nPlugins=PlugIns\n')
 if not (plugins / 'platforms/libqcocoa.dylib').is_file():
     raise RuntimeError('Cocoa platform plugin missing')
 if not (plugins / 'tls/libqsecuretransportbackend.dylib').is_file():
