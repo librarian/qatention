@@ -57,14 +57,12 @@ No signing credentials are required for these development builds.
 Linux still needs system graphics/input libraries (including libxkbcommon, X11/XCB,
 OpenGL/EGL, and fontconfig); the archive bundles Qt, not an entire Linux userspace.
 
-### Enable the GitHub build matrix
+### GitHub build matrix
 
-The initial publishing credential cannot create GitHub workflow files. The complete
-workflow is saved at [`docs/ci/build.yml`](docs/ci/build.yml). Move it to
-`.github/workflows/build.yml` using GitHub's web editor (or push using a credential
-with workflow permission). Its push trigger builds and tests all four targets and
-uploads their packages. Until that step is completed, this repository has a CI
-template rather than an active workflow.
+[Desktop builds](https://github.com/librarian/qatention/actions/workflows/build.yml)
+runs on pushes and pull requests. It builds and tests Linux x64, Windows x64,
+macOS Intel, and macOS Apple Silicon, then uploads their install-tree archives.
+The workflow is also runnable manually from GitHub Actions.
 
 ## Connect
 
