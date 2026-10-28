@@ -9,6 +9,7 @@
 #include <QSslConfiguration>
 #include <QRegularExpression>
 #include <QScopedValueRollback>
+#include <QCryptographicHash>
 
 static void initCertificateResource() { Q_INIT_RESOURCE(vendor_certificate); }
 namespace aten {
@@ -28,7 +29,18 @@ Session::Session(QObject *parent):QObject(parent) {
         if(!pending) requestFrame();
     });
 }
-void Session::setStatus(const QString &text) { statusText=text; emit stateChanged(); }
+void Session::reportTlsErrors(const QString &endpoint,const QList<QSslError> &errors) {
+    QStringList details;
+    for(const auto &error:errors) {
+        details.append(error.errorString());
+        const auto cert=error.certificate();
+        emit diagnostic(endpoint+" TLS: "+error.errorString()+"; subject="+cert.subjectInfo(QSslCertificate::CommonName).join(",")+
+            "; issuer="+cert.issuerInfo(QSslCertificate::CommonName).join(",")+
+            "; SHA256="+QString::fromLatin1(cert.digest(QCryptographicHash::Sha256).toHex()));
+    }
+    tlsFailure=endpoint+" certificate validation failed: "+details.join("; ");
+}
+void Session::setStatus(const QString &text) { statusText=text; emit diagnostic(text); emit stateChanged(); }
 void Session::close() {
     retry.stop(); reconnectOptions.clear(); established=false; retryCount=0;
     resetTransport();
@@ -56,6 +68,7 @@ void Session::resetTransport() {
         webAuthenticated=false;
     }
     web.setCookieJar(new QNetworkCookieJar(&web));
+    tlsFailure.clear();
     buffer.clear(); launch={}; decoder.reset(); pending=false; forceFull=false; controlling=true;
     phase=Phase::Idle; emit clearFrame(); setStatus("Disconnected");
 }
@@ -71,6 +84,7 @@ void Session::fail(const QString &text,bool transient) {
 }
 void Session::open(const QVariantMap &o) {
     close();
+    emit diagnostic("TLS backend: "+QSslSocket::activeBackend());
     if(o.value("autoArm",true).toBool() && o.value("autoReconnect",true).toBool()) reconnectOptions=o;
     startAttempt(o);
 }
@@ -101,6 +115,8 @@ void Session::startAttempt(const QVariantMap &o) {
     } catch(const std::exception &e) { fail(QString::fromUtf8(e.what())); }
 }
 void Session::requestWeb(const QString &path,const QByteArray &body,int step,const QByteArray &csrf) {
+    tlsFailure.clear();
+    emit diagnostic(QString("HTTPS request step %1 to %2:%3: %4").arg(step).arg(baseUrl.host()).arg(baseUrl.port()).arg(path));
     QNetworkRequest request(baseUrl.resolved(QUrl(path)));
     request.setHeader(QNetworkRequest::UserAgentHeader,"Mozilla/5.0 QATENtion");
     request.setRawHeader("Referer",baseUrl.toEncoded());
@@ -111,15 +127,17 @@ void Session::requestWeb(const QString &path,const QByteArray &body,int step,con
     if(!body.isEmpty()) request.setHeader(QNetworkRequest::ContentTypeHeader,"application/x-www-form-urlencoded");
     auto *r=body.isEmpty()? web.get(request) : web.post(request,body);
     reply=r; const auto epoch=generation;
-    connect(r,&QNetworkReply::sslErrors,this,[this,r](const QList<QSslError>&){if(allowUntrusted) r->ignoreSslErrors();});
+    connect(r,&QNetworkReply::sslErrors,this,[this,r](const QList<QSslError> &errors){ reportTlsErrors("HTTPS",errors); if(allowUntrusted) r->ignoreSslErrors(); });
     connect(r,&QNetworkReply::readyRead,this,[this,r]{
         if(r->bytesAvailable()>1024*1024) fail("BMC web response is too large");
     });
     connect(r,&QNetworkReply::finished,this,[this,r,step,epoch]{
         if(epoch!=generation) { r->deleteLater(); return; }
         reply=nullptr; r->deleteLater();
-        if(r->error()!=QNetworkReply::NoError) { fail("BMC web request failed: "+r->errorString(), r->error()==QNetworkReply::ConnectionRefusedError || r->error()==QNetworkReply::RemoteHostClosedError || r->error()==QNetworkReply::HostNotFoundError || r->error()==QNetworkReply::TimeoutError || r->error()==QNetworkReply::TemporaryNetworkFailureError); return; }
+        if(r->error()!=QNetworkReply::NoError) { fail(tlsFailure.isEmpty()?"BMC web request failed: "+r->errorString():tlsFailure, r->error()==QNetworkReply::ConnectionRefusedError || r->error()==QNetworkReply::RemoteHostClosedError || r->error()==QNetworkReply::HostNotFoundError || r->error()==QNetworkReply::TimeoutError || r->error()==QNetworkReply::TemporaryNetworkFailureError); return; }
+        tlsFailure.clear();
         auto b=r->readAll();
+        emit diagnostic(QString("Web response step %1: %2 bytes").arg(step).arg(b.size()));
         if(b.size()>1024*1024) { fail("BMC web response is too large"); return; }
         try { handleWeb(b,step); } catch(const std::exception &e) { fail(QString::fromUtf8(e.what())); }
     });
@@ -147,15 +165,17 @@ void Session::handleWeb(const QByteArray &body,int step) {
     }
 }
 void Session::connectKvm() {
+    tlsFailure.clear();
+    emit diagnostic(QString("Console endpoint %1:%2, TLS=%3").arg(launch.host).arg(launch.port).arg(launch.tls));
     phase=Phase::Connecting; setStatus("Connecting to console…");
     decoder=std::make_unique<Decoder>(); socket=new QSslSocket(this);
     socket->setReadBufferSize(MaxPacket+4096);
     connect(socket,&QSslSocket::readyRead,this,&Session::process);
     connect(socket,&QSslSocket::disconnected,this,[this]{if(busy()) fail("BMC disconnected",true);});
     connect(socket,&QSslSocket::errorOccurred,this,[this](QAbstractSocket::SocketError error){
-        if(socket) fail("Console connection failed: "+socket->errorString(), error!=QAbstractSocket::SslHandshakeFailedError);
+        if(socket) fail(tlsFailure.isEmpty()?"Console connection failed: "+socket->errorString():tlsFailure, error!=QAbstractSocket::SslHandshakeFailedError);
     });
-    auto begin=[this]{phase=Phase::Banner; deadline.start(15000); setStatus("Authenticating console…"); process();};
+    auto begin=[this]{tlsFailure.clear(); phase=Phase::Banner; deadline.start(15000); setStatus("Authenticating console…"); process();};
     connect(socket,&QSslSocket::connected,this,[this,begin]{
         socket->setSocketOption(QAbstractSocket::LowDelayOption,1);
         if(!launch.tls) begin();
@@ -168,7 +188,7 @@ void Session::connectKvm() {
         if(!QSslCertificate::importPkcs12(&pfx,&key,&cert)) throw Error("Cannot load bundled vendor client certificate with this TLS backend");
         socket->setLocalCertificate(cert); socket->setPrivateKey(key);
         socket->setProtocol(QSsl::TlsV1_2);
-        connect(socket,&QSslSocket::sslErrors,this,[this](const QList<QSslError>&){if(allowUntrusted) socket->ignoreSslErrors();});
+        connect(socket,&QSslSocket::sslErrors,this,[this](const QList<QSslError> &errors){ reportTlsErrors("Console",errors); if(allowUntrusted) socket->ignoreSslErrors(); });
         connect(socket,&QSslSocket::encrypted,this,begin);
         socket->connectToHostEncrypted(launch.host,launch.port);
     } else socket->connectToHost(launch.host,launch.port);
@@ -246,10 +266,12 @@ bool Session::consumeMessage() {
         for(int i=0;i<count;++i) {
             const int x=be16(buffer,pos),y=be16(buffer,pos+2),w=be16(buffer,pos+4),h=be16(buffer,pos+6);
             const auto encoding=be32(buffer,pos+8), n=be32(buffer,pos+16);
+            emit diagnostic(QString("Video rectangle %1x%2 at %3,%4, encoding %5, %6 bytes").arg(w).arg(h).arg(x).arg(y).arg(encoding).arg(n));
             if(!n) noSignal|=w>=0x8000 || h>=0x8000;
             else {
                 if(x==0 && y==0 && decoder->image().size()!=QSize(w,h)) { decoder->resize({w,h}); forceFull=true; }
-                changed|=decoder->decode(buffer.mid(pos+20,n),encoding);
+                try { changed|=decoder->decode(buffer.mid(pos+20,n),encoding); }
+                catch(...) { emit unsupportedFrame(buffer.mid(pos+20,n)); throw; }
             }
             pos+=20+n;
         }

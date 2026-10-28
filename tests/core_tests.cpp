@@ -7,6 +7,7 @@
 #include "core/decoder.h"
 #include "core/session.h"
 #include "core/profiles.h"
+#include "core/debuglog.h"
 #include <QTemporaryDir>
 #include <QFile>
 #include <QSslKey>
@@ -54,19 +55,29 @@ public:
 class CoreTests : public QObject {
     Q_OBJECT
 private slots:
-    void profilesPersistWithoutSecrets() {
+    void profilesPersistCredentials() {
         QTemporaryDir dir; QVERIFY(dir.isValid()); const auto path=dir.filePath("profiles.json");
         Profiles p(path);
         QVERIFY(p.save("Office", {{"host","bmc"},{"user","admin"},{"password","SECRET"},{"unexpected","SECRET"}}));
         Profiles loaded(path); QCOMPARE(loaded.entries().size(),1);
         QCOMPARE(loaded.entries()[0].toMap().value("user").toString(),QString("admin"));
-        QFile f(path); QVERIFY(f.open(QIODevice::ReadOnly)); QVERIFY(!f.readAll().contains("SECRET")); f.close();
+        QFile f(path); QVERIFY(f.open(QIODevice::ReadOnly)); QVERIFY(f.readAll().contains("SECRET")); f.close();
         QVERIFY(p.save("Office", {{"host","bmc2"},{"autoArm",false},{"user","TOKEN"},{"password","SECRET"}}));
-        Profiles manual(path); QCOMPARE(manual.entries().size(),1); QVERIFY(!manual.entries()[0].toMap().contains("user"));
+        Profiles manual(path); QCOMPARE(manual.entries().size(),1); QCOMPARE(manual.entries()[0].toMap().value("user").toString(),QString("TOKEN"));
+        QCOMPARE(manual.entries()[0].toMap().value("password").toString(),QString("SECRET"));
         QVERIFY(manual.remove("Office")); Profiles empty(path); QVERIFY(empty.entries().isEmpty());
         QVERIFY(f.open(QIODevice::WriteOnly)); f.write("broken"); f.close();
         Profiles broken(path); QVERIFY(!broken.error().isEmpty()); QVERIFY(!broken.save("New",{{"host","bmc"}}));
         QVERIFY(f.open(QIODevice::ReadOnly)); QCOMPARE(f.readAll(),QByteArray("broken"));
+    }
+    void debugLogOptInAndRotation() {
+        QTemporaryDir dir; const auto path=dir.filePath("debug.log"); DebugLog log(path);
+        log.write("disabled"); QVERIFY(!QFile::exists(path));
+        log.setEnabled(true); log.write("connection failed");
+        QFile f(path); QVERIFY(f.open(QIODevice::ReadOnly)); QVERIFY(f.readAll().contains("connection failed")); f.close();
+        log.setEnabled(false); QVERIFY(f.open(QIODevice::WriteOnly|QIODevice::Append)); QVERIFY(f.resize(DebugLog::MaxFileBytes)); f.close();
+        log.setEnabled(true); QVERIFY(QFile::exists(path+".old"));
+        QVERIFY(QFileInfo(path).size()<1024); log.clear(); QVERIFY(log.text().isEmpty()); QVERIFY(!QFile::exists(path));
     }
     void wireVectors() {
         QCOMPARE(keyEvent(0x41beef,true).toHex(),QByteArray("04000100000041beef000000000000000000"));
@@ -155,6 +166,9 @@ private slots:
             QByteArray init(36,0);put16(init,0,2);put16(init,2,2);
             peer->write(QByteArray(4,0)+init); QTRY_VERIFY(s.connected());
         };
+        auto untrustedOptions=options; untrustedOptions["allowUntrusted"]=false;
+        s.open(untrustedOptions); QTRY_VERIFY(!s.busy());
+        QVERIFY(s.status().contains("HTTPS certificate validation failed")); QCOMPARE(web.logins,0);
         s.open(options); QTRY_VERIFY(console.hasPendingConnections());
         auto *peer=console.nextPendingConnection(); handshake(peer,1);
         peer->abort(); QTRY_VERIFY(s.status().contains("reconnect 1/6"));

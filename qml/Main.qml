@@ -10,21 +10,13 @@ ApplicationWindow {
     minimumWidth: 720; minimumHeight: 500
     visible: true
     title: "QATENtion — desktop preview"
-    color: "#20262d"
-    palette.window: "#20262d"
-    palette.windowText: "#e4e9ed"
-    palette.base: "#15191e"
-    palette.text: "#e4e9ed"
-    palette.placeholderText: "#aab4be"
-    palette.button: "#35404b"
-    palette.buttonText: "#e4e9ed"
-    palette.highlight: "#4b91c8"
 
     header: ToolBar {
         RowLayout {
             anchors.fill: parent; anchors.margins: 4
             Button { text: "Connect…"; enabled: !kvm.busy; onClicked: connection.open() }
             Button { text: "Disconnect"; enabled: kvm.busy; onClicked: kvm.close() }
+            Button { text: "Debug log"; onClicked: logging.open() }
             ToolSeparator {}
             Button { text: "Refresh"; enabled: kvm.connected; onClicked: kvm.refresh() }
             Button { text: "Ctrl+Alt+Del"; enabled: kvm.connected; onClicked: kvm.ctrlAltDelete() }
@@ -39,7 +31,6 @@ ApplicationWindow {
     Console { id: console; anchors.fill: parent; session: kvm }
     footer: Label {
         text: kvm.status; padding: 10; wrapMode: Text.Wrap
-        background: Rectangle { color: "#29323b" }
     }
     FileDialog {
         id: screenshot
@@ -53,6 +44,27 @@ ApplicationWindow {
         id: screenshotError; title: "Screenshot could not be saved"
         anchors.centerIn: parent; standardButtons: Dialog.Ok
         Label { text: "Check that a frame is available and the destination is writable." }
+    }
+    Dialog {
+        id: logging; title: "Debug log"
+        anchors.centerIn: parent; modal: false
+        width: Math.min(850, window.width - 40); height: Math.min(550, window.height - 40)
+        standardButtons: Dialog.Close
+        contentItem: ColumnLayout {
+            RowLayout {
+                CheckBox { text: "Enable debug logging"; checked: debugLog.enabled; onToggled: debugLog.enabled = checked }
+                Button { text: "Clear"; onClicked: debugLog.clear() }
+            }
+            TextField { Layout.fillWidth: true; text: debugLog.path; readOnly: true; selectByMouse: true }
+            Label {
+                Layout.fillWidth: true; wrapMode: Text.Wrap
+                text: "Logs omit credentials and typed keys. The first unsupported video packet is saved beside the log and may contain console pixels."
+            }
+            ScrollView {
+                Layout.fillWidth: true; Layout.fillHeight: true; clip: true
+                TextArea { text: debugLog.text; onTextChanged: cursorPosition = length; readOnly: true; selectByMouse: true; font.family: "monospace"; wrapMode: TextEdit.Wrap }
+            }
+        }
     }
     Dialog {
         id: deleteProfile; title: "Delete saved profile?"
@@ -84,7 +96,7 @@ ApplicationWindow {
                 frameInterval: continuous.checked ? 33 : 100}
         }
         function loadProfile(p) {
-            password.clear()
+            password.text = p.password || ""
             profileName.text = p.name || ""
             host.text = p.host || ""
             autoArm.checked = p.autoArm !== false
@@ -97,6 +109,7 @@ ApplicationWindow {
             continuous.checked = p.frameInterval === 33
             reconnect.checked = p.autoReconnect !== false
         }
+        onOpened: { if (profilePicker.currentIndex >= 0) connection.loadProfile(profiles.entries[profilePicker.currentIndex]) }
         onRejected: password.clear()
         contentItem: ScrollView {
             id: connectionScroll
@@ -132,7 +145,7 @@ ApplicationWindow {
                     }
                 }
             }
-            Label { Layout.fillWidth: true; visible: text.length > 0; text: profiles.error; color: "#ffaaaa"; wrapMode: Text.Wrap }
+            Label { Layout.fillWidth: true; visible: text.length > 0; text: profiles.error; wrapMode: Text.Wrap }
             TextField { id: host; Layout.fillWidth: true; placeholderText: "BMC hostname or IP address" }
             CheckBox { id: autoArm; text: "Log in through the BMC web interface"; checked: true }
             TextField { id: user; Layout.fillWidth: true; placeholderText: autoArm.checked ? "BMC username" : "KVM username token" }
@@ -154,7 +167,7 @@ ApplicationWindow {
             CheckBox { id: continuous; text: "Request updates up to 30 times per second" }
             Label {
                 Layout.fillWidth: true; wrapMode: Text.Wrap
-                text: "Credentials are kept in memory only. Manual mode needs fresh tokens from the BMC launch JNLP, not the web password."
+                text: "Save profile stores these credentials locally. Manual tokens can expire; refresh them from the BMC launch JNLP."
             }
             Label {
                 Layout.fillWidth: true; wrapMode: Text.Wrap

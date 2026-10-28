@@ -29,13 +29,15 @@ public:
     void key(quint32 usage, bool down);
     void pointer(int x,int y,int buttons);
 signals:
+    void diagnostic(const QString &message);
+    void unsupportedFrame(const QByteArray &packet);
     void stateChanged();
     void frameReady(const QImage &image);
     void clearFrame();
 private:
     enum class Phase { Idle, Reconnecting, Web, Connecting, Banner, Security, Challenge, Auth, Init, Messages };
     Phase phase=Phase::Idle;
-    QString statusText="Disconnected";
+    QString statusText="Disconnected", tlsFailure;
     QPointer<QSslSocket> socket;
     QPointer<QNetworkReply> reply;
     QNetworkAccessManager web;
@@ -54,6 +56,7 @@ private:
     QSet<quint32> held;
     QPoint lastPointer;
     int buttons=0, frameInterval=100;
+    void reportTlsErrors(const QString &endpoint,const QList<QSslError> &errors);
     void setStatus(const QString &text);
     void fail(const QString &text, bool transient=false);
     void resetTransport();

@@ -14,7 +14,8 @@ add_library(qatention_core STATIC
     src/core/decoder.cpp src/core/decoder.h
     src/core/protocol.cpp src/core/protocol.h
     src/core/session.cpp src/core/session.h
-    src/core/profiles.cpp src/core/profiles.h)
+    src/core/profiles.cpp src/core/profiles.h
+    src/core/debuglog.cpp src/core/debuglog.h)
 target_include_directories(qatention_core PUBLIC src)
 target_link_libraries(qatention_core PUBLIC Qt6::Core Qt6::Gui Qt6::Network PRIVATE aspeed)
 qt_add_resources(qatention_core vendor_certificate PREFIX / FILES resources/client.pfx)
@@ -38,8 +39,10 @@ else()
     set(headless_plugin_dir plugins/platforms)
 endif()
 install(FILES $<TARGET_FILE:Qt6::QOffscreenIntegrationPlugin> DESTINATION ${headless_plugin_dir})
-qt_generate_deploy_qml_app_script(TARGET qatention OUTPUT_SCRIPT deploy_script)
-install(SCRIPT ${deploy_script})
+if(NOT CMAKE_CROSSCOMPILING)
+    qt_generate_deploy_qml_app_script(TARGET qatention OUTPUT_SCRIPT deploy_script)
+    install(SCRIPT ${deploy_script})
+endif()
 install(FILES LICENSE README.md THIRD_PARTY.md DESTINATION ${CMAKE_INSTALL_DATADIR}/qatention)
 install(DIRECTORY third_party/aspeed DESTINATION ${CMAKE_INSTALL_DATADIR}/qatention/source)
 

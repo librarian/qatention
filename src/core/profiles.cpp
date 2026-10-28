@@ -9,9 +9,8 @@
 namespace aten {
 QVariantMap Profiles::sanitize(const QVariantMap &o) {
     QVariantMap result;
-    for(const auto &key : {"host","autoArm","port","tls","webPort","allowUntrusted","switchJava","frameInterval","autoReconnect"})
+    for(const auto &key : {"host","user","password","autoArm","port","tls","webPort","allowUntrusted","switchJava","frameInterval","autoReconnect"})
         if(o.contains(key)) result[key]=o[key];
-    if(o.value("autoArm",true).toBool()) result["user"]=o.value("user");
     return result;
 }
 Profiles::Profiles(QString file,QObject *parent):QObject(parent),path(std::move(file)) {

@@ -16,57 +16,78 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-24.04
-            arch: linux_gcc_64
-            label: linux-x64
-          - os: windows-2022
-            arch: win64_msvc2022_64
-            label: windows-x64
-    runs-on: ${{ matrix.os }}
+        target: [linux-x64, windows-x64]
+    runs-on: ubuntu-24.04
     env:
       QT_QPA_PLATFORM: offscreen
       QT_QUICK_BACKEND: software
+      WINEDEBUG: '-all'
+      WINEPREFIX: ${{ github.workspace }}/wine-prefix
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Linux build dependencies
-        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libfontconfig1-dev libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-image0 libxcb-render-util0
-      - uses: ilammy/msvc-dev-cmd@v1
-        if: runner.os == 'Windows'
+      - name: Windows cross-build dependencies
+        if: matrix.target == 'windows-x64'
+        run: sudo apt-get install -y g++-mingw-w64-x86-64-posix wine64 wine
       - uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.3'
-          arch: ${{ matrix.arch }}
+          arch: linux_gcc_64
           cache: true
+      - name: Cache Windows SDK and OpenSSL
+        if: matrix.target == 'windows-x64'
+        id: windows-cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            qt-windows
+            openssl-windows
+          key: ubuntu24-mingw-qt6.8.3-openssl3.5.9-v1
+      - name: Install Windows SDK and build OpenSSL
+        if: matrix.target == 'windows-x64' && steps.windows-cache.outputs.cache-hit != 'true'
+        run: |
+          python -m pip install aqtinstall==3.3.0
+          python -m aqt install-qt windows desktop 6.8.3 win64_mingw -O qt-windows
+          bash scripts/build_windows_openssl.sh "$PWD/openssl-windows" "$RUNNER_TEMP/openssl-build"
       - name: Configure
-        shell: bash
         run: |
           args=()
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            args+=(-DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl)
+          if [[ '${{ matrix.target }}' == 'windows-x64' ]]; then
+            args+=(-DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/mingw64.cmake
+                   "-DCMAKE_PREFIX_PATH=$PWD/qt-windows/6.8.3/mingw_64"
+                   "-DQT_HOST_PATH=$QT_ROOT_DIR")
           fi
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release "${args[@]}"
       - name: Build
         run: cmake --build build --parallel 3
-      - name: Test
+      - name: Test Linux
+        if: matrix.target == 'linux-x64'
         run: ctest --test-dir build --output-on-failure
-      - name: Package runtime
-        run: cmake --install build --prefix "${{ github.workspace }}/dist"
+      - name: Install
+        run: cmake --install build --prefix "$PWD/dist"
+      - name: Deploy and test Windows package under Wine
+        if: matrix.target == 'windows-x64'
+        run: python scripts/package_windows.py --qt qt-windows/6.8.3/mingw_64 --openssl openssl-windows --build build --dest dist
+      - name: Include MinGW licenses
+        if: matrix.target == 'windows-x64'
+        run: |
+          cp /usr/share/doc/gcc-mingw-w64-base/copyright dist/licenses/GCC-runtime.txt
+          cp /usr/share/doc/mingw-w64-common/copyright dist/licenses/MinGW-w64.txt
+          cp /usr/share/common-licenses/GPL-3 dist/licenses/GPL-3.txt
       - name: Include Qt licenses
-        shell: bash
         run: |
           mkdir -p dist/licenses/qt
           for name in LGPL-3.0-only GPL-3.0-only; do
             curl --fail --location "https://raw.githubusercontent.com/qt/qtbase/v6.8.3/LICENSES/$name.txt" -o "dist/licenses/qt/$name.txt"
           done
-      - name: Test installed application
+      - name: Test installed Linux application
+        if: matrix.target == 'linux-x64'
         run: python scripts/smoke_installed.py dist
-      - name: Archive
-        shell: bash
-        run: tar -czf "qatention-${{ matrix.label }}.tar.gz" -C dist .
+      - name: Create ZIP
+        run: python scripts/archive.py dist qatention-${{ matrix.target }}.zip
       - uses: actions/upload-artifact@v7.0.2
         with:
-          name: qatention-${{ matrix.label }}
-          path: qatention-${{ matrix.label }}.tar.gz
+          path: qatention-${{ matrix.target }}.zip
+          archive: false
           if-no-files-found: error

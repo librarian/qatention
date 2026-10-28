@@ -6,3 +6,9 @@
 *.bmp
 *.deb
 .DS_Store
+
+/qt-windows/
+/openssl-windows/
+/wine-prefix/
+*.zip
+__pycache__/

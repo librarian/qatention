@@ -13,10 +13,12 @@ Verified locally:
 - Fragmented TCP handshake and frame delivery against an in-process mock BMC.
 - Keyboard release, view-only input suppression, hostile payload length rejection,
   and cancellation during connection establishment.
-- Profile persistence, updates/deletion, exclusion of passwords and manual tokens,
+- Profile persistence, updates/deletion, restoration of passwords and manual tokens,
   and refusal to overwrite unreadable/corrupt storage.
 - Local HTTPS mock BMC: fresh tokens after a dropped console, increasing retry delay,
   cancellation during backoff, and stopping after web authentication rejection.
+- Debug logging opt-in, file rotation and clear; HTTPS certificate rejection includes
+  endpoint-specific validation reasons.
 - Qt Quick UI loads with the software renderer; the bundled mutual-TLS client
   identity imports successfully with the local TLS backend.
 - Installed application passes the same headless smoke test without the Qt SDK
@@ -28,12 +30,21 @@ controlling". This confirms connection and video rendering on that tested setup.
 The screenshot alone does not establish the transport/authentication mode or
 complete keyboard/mouse behavior.
 
-Linux and Windows CI builds, protocol/decoder tests and installed-package smoke
-tests passed at commit `b753720`. The package checks remove the Qt SDK's runtime
+Linux and native Windows CI builds, protocol/decoder tests and installed-package
+smoke tests passed at commit `6037212`. The package checks remove the Qt SDK's runtime
 paths before starting the installed application.
+
+The subsequent MinGW cross-build was verified locally with GCC 14 and Wine 10:
+all 11 core test cases passed, as did installed UI/TLS startup with the bundled
+MinGW OpenSSL 3.5.9 runtime. The Linux ZIP was checked for executable permissions
+and absence of nested archives. The new CI runs both targets on Ubuntu 24.04;
+Windows protocol and packaged-startup tests run under Wine.
 
 Not yet verified: sustained video performance, all physical keyboard/mouse paths,
 HTTPS web arming and mutual TLS on hardware as separate test cases, or interactive
 Linux behavior. Consult the desktop workflow for current build/test status.
+The reported Let's Encrypt rejection used a matching DNS hostname. Its exact cause
+is not yet reproduced; the new TLS diagnostics distinguish HTTPS from console
+certificate errors. Neither endpoint silently bypasses verification.
 macOS builds and verification are deferred.
 Synthetic decoder tests do not establish correctness for all ASPEED bitstreams.

@@ -50,7 +50,7 @@ or the equivalent installed path. `--smoke-test` opens the UI briefly and checks
 that TLS and the bundled client certificate can be loaded; it makes no network
 connections. CI runs it both before and after packaging.
 
-CI uploads install-tree archives with the Qt runtime and QML imports. Linux
+CI uploads plain ZIP files with the Qt runtime and QML imports, with no nested archive. Linux
 packages target the CI distribution's ABI, not every Linux release. Windows packages are unsigned.
 No signing credentials are required for these development builds.
 Linux still needs system graphics/input libraries (including libxkbcommon, X11/XCB,
@@ -60,18 +60,24 @@ OpenGL/EGL, and fontconfig); the archive bundles Qt, not an entire Linux userspa
 
 [Desktop builds](https://github.com/librarian/qatention/actions/workflows/build.yml)
 runs on pushes and pull requests. It builds and tests Linux x64 and Windows x64
-on native runners, then uploads their install-tree archives. macOS jobs are disabled.
+using Linux runners for both targets: Linux builds natively; Windows cross-compiles
+with MinGW and uses Wine for the protocol tests and installed UI/TLS smoke test.
+Wine validation does not replace interactive Windows hardware testing.
+The Windows package bundles OpenSSL built with MinGW, requiring no MSVC runtime.
+macOS jobs are disabled.
 The workflow is also runnable manually from GitHub Actions.
 
 ## Connect
 
-Enter the BMC host and web credentials; HTTPS is the default. Passwords and
-single-use tokens remain in memory and are not saved in settings or logs.
+Enter the BMC host and web credentials; HTTPS is the default. Debug logs exclude
+passwords, tokens, cookies and typed keys.
 
 Use **Save profile** in the connection dialog to store a named host and connection
-settings, including the web username. Saving the same name updates it. Select a
-profile to load it, or use Delete to remove it. Passwords must be entered again;
-manual-mode profiles save neither token. Profiles live in `profiles.json` under
+settings, including the username and password. Saving the same name updates it.
+Select a profile to load it, or use Delete to remove it. Manual-mode tokens are
+saved too, but can expire and need replacing. The local profile file contains
+credentials in plaintext; it is written atomically with owner read/write permissions
+(where supported). Profiles live in `profiles.json` under
 Qt's application configuration directory (`%LOCALAPPDATA%/qatention/QATENtion`
 on Windows, `$XDG_CONFIG_HOME/qatention/QATENtion` or
 `~/.config/qatention/QATENtion` on Linux).
@@ -81,11 +87,15 @@ Dropped connections trigger up to six attempts, after 2, 4, 8, 16, 30 and 30
 seconds. Each attempt logs in again for fresh console tokens. Receiving a console
 message resets the retry budget. Authentication rejection, TLS errors and invalid
 protocol data stop retries; Disconnect cancels pending attempts and forgets the
-in-memory password. Manual-token connections require fresh tokens and do not retry.
+in-memory password; explicitly saved profiles remain on disk. Manual-token
+connections require fresh tokens and do not retry.
 
 If the BMC uses a self-signed certificate, the connection dialog has an explicit
 option to allow an unverified certificate for that connection. The bundled vendor
 client certificate authenticates the client; it does **not** authenticate the BMC.
+The HTTPS and console endpoints can present different server certificates.
+Validation failures identify the endpoint and the exact TLS errors; debug logging
+also records the certificate subject, issuer, and SHA-256 fingerprint.
 
 If the BMC is configured for HTML5-only console access, opt into switching its
 console setting to Java. This changes a BMC setting. Otherwise leave it unchecked.
@@ -99,6 +109,42 @@ Ctrl+Alt+Del button for that remote sequence. Keyboard mapping currently assumes
 a US layout. The default requests incremental updates with a full refresh every
 five seconds. The faster option requests full frames continuously, with a 30 Hz
 request cap; actual performance depends on the BMC.
+
+## Debug logging and appearance
+
+The **Debug log** button opens a live log panel with an opt-in toggle, Clear button,
+and selectable file path. The toggle persists between launches. Logs record connection
+states, reconnect attempts, TLS validation failures, and video rectangle metadata.
+The file rotates at 10 MiB and keeps one previous file; the panel keeps 64K characters.
+The first unsupported video packet is saved beside the log for decoder investigation
+and may contain console pixels. Logs are under Qt's application-local data directory,
+in `logs/qatention.log`.
+
+Controls use Qt's default platform style and palette: Windows on Windows, Fusion
+on Linux, and macOS when that build is enabled. No custom palette is forced.
+Qt Quick's Linux Fusion style is a desktop style, not a GTK widget implementation.
+
+## Cross-compile Windows on Linux
+
+Install the native Linux build dependencies above plus
+`g++-mingw-w64-x86-64-posix wine64 wine`. Install matching Qt 6.8.3 Linux host
+and Windows MinGW SDKs (for example with `aqtinstall`). Then:
+
+```sh
+bash scripts/build_windows_openssl.sh "$PWD/openssl-windows" /tmp/openssl-build
+cmake -S . -B build-windows -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/mingw64.cmake \
+  -DCMAKE_PREFIX_PATH=/path/to/windows/6.8.3/mingw_64 \
+  -DQT_HOST_PATH=/path/to/linux/6.8.3/gcc_64
+cmake --build build-windows --parallel 3
+cmake --install build-windows --prefix "$PWD/dist"
+python scripts/package_windows.py --qt /path/to/windows/6.8.3/mingw_64 \
+  --openssl openssl-windows --build build-windows --dest dist
+python scripts/archive.py dist qatention-windows-x64.zip
+```
+
+The packaging script uses Qt's `windeployqt` under Wine and runs both core tests
+and the installed UI/TLS smoke test. CI caches the Windows SDK and OpenSSL build.
 
 ## Architecture
 
