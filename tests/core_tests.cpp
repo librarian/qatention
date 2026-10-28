@@ -25,7 +25,7 @@ static QByteArray frameMessage(const QByteArray &p,int w,int h) {
 }
 class WebBmc : public QTcpServer {
 public:
-    int logins=0;
+    int logins=0,logouts=0;
     bool reject=false;
     quint16 consolePort=0;
     QSslKey key;
@@ -41,6 +41,7 @@ public:
             if(!data->contains("\r\n\r\n")) return;
             if(data->startsWith("POST") && !data->contains("pwd=password")) return;
             QByteArray body,headers;
+            if(data->startsWith("GET /cgi/logout.cgi")) ++logouts;
             if(data->startsWith("POST /cgi/login.cgi")) {
                 ++logins;
                 if(!reject) headers="Set-Cookie: SID=test; Path=/\r\n";
@@ -179,9 +180,12 @@ private slots:
         QVERIFY(s.status().contains("HTTPS certificate validation failed")); QCOMPARE(web.logins,0);
         s.open(options); QTRY_VERIFY(console.hasPendingConnections());
         auto *peer=console.nextPendingConnection(); handshake(peer,1);
+        s.setKeepMedia(true);
         peer->abort(); QTRY_VERIFY(s.status().contains("reconnect 1/30"));
         QTRY_VERIFY_WITH_TIMEOUT(console.hasPendingConnections(),7000);
         peer=console.nextPendingConnection(); handshake(peer,2); QCOMPARE(web.logins,2);
+        QCOMPARE(web.logouts,0); // A mounted ISO keeps the previous web login alive.
+        s.setKeepMedia(false);QTRY_COMPARE(web.logouts,1);
         peer->abort(); QTRY_VERIFY(s.status().contains("reconnect 2/30"));
         s.close(); QTest::qWait(5200); QCOMPARE(web.logins,2); QCOMPARE(s.status(),QString("Disconnected"));
         // A new session that loses its transport must stop if web authentication is rejected.
