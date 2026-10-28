@@ -48,10 +48,12 @@ with tempfile.TemporaryDirectory(prefix='qatention-wine-') as work:
             shutil.copy2(build / tests.name, tests)
             try:
                 report = Path(work) / (name + '.txt')
-                result = subprocess.run([args.wine, str(tests), '-o', windows(report) + ',txt'],
-                                        cwd=work, env=environment, timeout=90)
-                if report.exists():
-                    print(report.read_text(), flush=True)
+                try:
+                    result = subprocess.run([args.wine, str(tests), '-o', windows(report) + ',txt'],
+                                            cwd=work, env=environment, timeout=90)
+                finally:
+                    if report.exists():
+                        print(report.read_text(), flush=True)
                 result.check_returncode()
             finally:
                 tests.unlink(missing_ok=True)
