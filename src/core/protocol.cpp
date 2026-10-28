@@ -41,6 +41,9 @@ Launch parseJnlp(const QByteArray &xml) {
     Launch l; l.host=args[0]; l.user=args[1]; l.password=args[2]; l.tls=args[8]=="1";
     bool ok=false; int port=args[l.tls?9:4].toInt(&ok);
     if(!ok || port<1 || port>65535 || l.host.isEmpty()) throw Error("Invalid JNLP endpoint");
-    l.port=quint16(port); credentials(l.user,l.password); return l;
+    l.port=quint16(port);
+    const int mediaIndex=l.tls?10:5;
+    if(args.size()>mediaIndex) {int media=args[mediaIndex].toInt();if(media>0 && media<=65535) l.mediaPort=quint16(media);}
+    credentials(l.user,l.password); return l;
 }
 }

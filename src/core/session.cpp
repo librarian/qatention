@@ -1,4 +1,5 @@
 #include "session.h"
+#include "media.h"
 #include <QNetworkReply>
 #include <QNetworkCookieJar>
 #include <QNetworkCookie>
@@ -24,8 +25,10 @@ Session::Session(QObject *parent):QObject(parent) {
     heartbeat.setInterval(3000);
     connect(&heartbeat,&QTimer::timeout,this,[this]{
         if(!connected()) return;
-        if(received.elapsed()>30000) { fail("BMC stopped responding",true); return; }
+        if(received.elapsed()>60000) { fail("BMC stopped responding",true); return; }
         send(QByteArray::fromHex("150000000100000000"));
+        if(powerPoll.elapsed()>=10000) {send(QByteArray(1,0x37));powerPoll.restart();}
+        if(received.elapsed()>10000) {pending=false;forceFull=true;}
         if(!pending) requestFrame();
     });
 }
@@ -43,7 +46,7 @@ void Session::reportTlsErrors(const QString &endpoint,const QList<QSslError> &er
 void Session::setStatus(const QString &text) { statusText=text; emit diagnostic(text); emit stateChanged(); }
 void Session::close() {
     retry.stop(); reconnectOptions.clear(); established=false; retryCount=0;
-    resetTransport();
+    resetTransport(); mediaLaunch={};
 }
 void Session::resetTransport() {
     if(closing) return;
@@ -53,7 +56,7 @@ void Session::resetTransport() {
     deadline.stop(); heartbeat.stop(); nextFrame.stop();
     if(reply) { reply->disconnect(this); reply->abort(); reply->deleteLater(); reply=nullptr; }
     if(socket) { socket->disconnect(this); socket->abort(); socket->deleteLater(); socket=nullptr; }
-    if(webAuthenticated) {
+    if(webAuthenticated && !keepMedia && !established) {
         // Separate manager keeps logout cookies alive without holding up a new connection.
         auto *logout=new QNetworkAccessManager(this);
         auto *jar=new QNetworkCookieJar(logout);
@@ -74,11 +77,11 @@ void Session::resetTransport() {
 }
 void Session::fail(const QString &text,bool transient) {
     if(closing) return;
-    if(transient && established && !reconnectOptions.isEmpty() && retryCount<6) {
+    if(transient && established && !reconnectOptions.isEmpty() && retryCount<30) {
         resetTransport();
-        const int seconds=qMin(30,2<<retryCount++);
+        const int seconds=++retryCount<=5?5:30;
         phase=Phase::Reconnecting;
-        setStatus(text+QString(" — reconnect %1/6 in %2 seconds (Disconnect cancels)").arg(retryCount).arg(seconds));
+        setStatus(text+QString(" — reconnect %1/30 in %2 seconds (Disconnect cancels)").arg(retryCount).arg(seconds));
         retry.start(seconds*1000);
     } else { close(); setStatus(text); }
 }
@@ -90,15 +93,20 @@ void Session::open(const QVariantMap &o) {
 }
 void Session::startAttempt(const QVariantMap &o) {
     try {
-        allowUntrusted=o.value("allowUntrusted").toBool(); switchJava=o.value("switchJava").toBool();
-        frameInterval=qBound(33,o.value("frameInterval",100).toInt(),1000);
+        allowUntrusted=o.value("allowUntrusted",true).toBool(); switchJava=o.value("switchJava").toBool();
+        frameInterval=qBound(0,o.value("frameInterval",0).toInt(),1000);
         launch.host=o.value("host").toString().trimmed();
+        if(launch.host.contains("://")) launch.host=QUrl(launch.host).host();
+        else {if(launch.host.contains('/')) launch.host=launch.host.section('/',0,0);
+            if(launch.host.contains('@')) launch.host=launch.host.section('@',-1);
+            if(launch.host.startsWith('[')) launch.host=launch.host.section(']',0,0).mid(1);
+            else if(launch.host.count(':')==1) launch.host=launch.host.section(':',0,0);}
         if(launch.host.isEmpty() || launch.host.contains('/') || launch.host.contains('@')) throw Error("Enter a BMC hostname or IP address");
         launch.user=o.value("user").toString(); launch.password=o.value("password").toString();
         if(launch.user.isEmpty() || launch.password.isEmpty()) throw Error("Enter credentials");
         if(o.value("autoArm",true).toBool()) {
             phase=Phase::Web;
-            baseUrl=QUrl(); baseUrl.setScheme("https"); baseUrl.setHost(launch.host);
+            baseUrl=QUrl(); baseUrl.setScheme(o.value("http",false).toBool()?"http":"https"); baseUrl.setHost(launch.host);
             auto webPort=o.value("webPort",443).toInt();
             if(webPort<1 || webPort>65535) throw Error("Invalid HTTPS port");
             baseUrl.setPort(webPort);
@@ -109,7 +117,7 @@ void Session::startAttempt(const QVariantMap &o) {
         } else {
             auto port=o.value("port",5900).toInt();
             if(port<1 || port>65535) throw Error("Invalid KVM port");
-            launch.port=quint16(port); launch.tls=o.value("tls",true).toBool();
+            launch.mediaPort=quint16(qBound(1,o.value("mediaPort",623).toInt(),65535));launch.port=quint16(port); launch.tls=o.value("tls",true).toBool();
             credentials(launch.user,launch.password); connectKvm();
         }
     } catch(const std::exception &e) { fail(QString::fromUtf8(e.what())); }
@@ -165,6 +173,7 @@ void Session::handleWeb(const QByteArray &body,int step) {
     }
 }
 void Session::connectKvm() {
+    mediaLaunch=launch;
     tlsFailure.clear();
     emit diagnostic(QString("Console endpoint %1:%2, TLS=%3").arg(launch.host).arg(launch.port).arg(launch.tls));
     phase=Phase::Connecting; setStatus("Connecting to console…");
@@ -183,11 +192,7 @@ void Session::connectKvm() {
     deadline.start(15000);
     if(launch.tls) {
         if(!QSslSocket::supportsSsl()) throw Error("No TLS backend available");
-        QFile pfx(":/resources/client.pfx"); pfx.open(QIODevice::ReadOnly);
-        QSslKey key; QSslCertificate cert;
-        if(!QSslCertificate::importPkcs12(&pfx,&key,&cert)) throw Error("Cannot load bundled vendor client certificate with this TLS backend");
-        socket->setLocalCertificate(cert); socket->setPrivateKey(key);
-        socket->setProtocol(QSsl::TlsV1_2);
+        configureClientTls(socket);
         connect(socket,&QSslSocket::sslErrors,this,[this](const QList<QSslError> &errors){ reportTlsErrors("Console",errors); if(allowUntrusted) socket->ignoreSslErrors(); });
         connect(socket,&QSslSocket::encrypted,this,begin);
         socket->connectToHostEncrypted(launch.host,launch.port);
@@ -233,9 +238,9 @@ void Session::process() {
                 if(buffer.size()<36+n) return;
                 const QSize size(be16(buffer,0),be16(buffer,2)); decoder->resize(size);
                 buffer.remove(0,36+n); phase=Phase::Messages; established=true; deadline.stop();
-                received.start(); fullFrame.start(); heartbeat.start();
+                received.start(); fullFrame.start(); heartbeat.start();uptime.start();powerPoll.start();videoBytes=frames=0;powerState=-1;sessionUsers.clear();userBurst.clear();
                 setStatus("Connected — click the console to send input");
-                send(QByteArray::fromHex("3732000b01bc070780360001"));
+                send(QByteArray::fromHex("37070780360001"));setDisplay(quality,imageMode);
                 forceFull=true; requestFrame(); break;
             }
             case Phase::Messages:
@@ -270,14 +275,14 @@ bool Session::consumeMessage() {
             if(!n) noSignal|=w>=0x8000 || h>=0x8000;
             else {
                 if(x==0 && y==0 && decoder->image().size()!=QSize(w,h)) { decoder->resize({w,h}); forceFull=true; }
-                try { changed|=decoder->decode(buffer.mid(pos+20,n),encoding); }
+                try {emit videoPacket(buffer.mid(pos+20,n),encoding);if(!decoder) return false; changed|=decoder->decode(buffer.mid(pos+20,n),encoding); }
                 catch(...) { emit unsupportedFrame(buffer.mid(pos+20,n)); throw; }
             }
             pos+=20+n;
         }
-        buffer.remove(0,length); pending=false;
+        buffer.remove(0,length); pending=false;videoBytes+=quint64(length);
         if(noSignal) { emit clearFrame(); setStatus("Connected — no video signal"); }
-        else if(changed) { emit frameReady(decoder->image()); setStatus(controlling?"Connected — controlling":"Connected — view only"); }
+        else if(changed) { ++frames;emit frameReady(decoder->image()); setStatus(controlling?"Connected — controlling":"Connected — view only"); }
         nextFrame.start(frameInterval); return true;
     }
     switch(type) {
@@ -298,7 +303,17 @@ bool Session::consumeMessage() {
     default:throw Error("Unknown server message; connection closed to preserve stream alignment");
     }
     if(buffer.size()<length) return false;
+    if(type==0x37) {powerState=buffer[3]?1:0;emit stateChanged();}
     if(type==0x39) {
+        const auto index=be32(buffer,1),kind=be32(buffer,5);
+        const auto info=QString::fromLatin1(buffer.mid(9,256).split('\0').first()).trimmed();
+        const auto sid=info.section(' ',0,0);
+        if(kind==1) {
+            if(index>1) userBurst.append(info);
+            else if(!userBurst.isEmpty()) {userBurst.append(info);sessionUsers=userBurst;userBurst.clear();}
+            else {for(int i=sessionUsers.size()-1;i>=0;--i) if(sessionUsers[i].section(' ',0,0)==sid) sessionUsers.removeAt(i);sessionUsers.append(info);}
+        } else if(kind==2) {for(int i=sessionUsers.size()-1;i>=0;--i) if(sessionUsers[i].section(' ',0,0)==sid) sessionUsers.removeAt(i);}
+        else if(kind!=7) emit diagnostic(QString("BMC notice %1: %2").arg(kind).arg(info));
         const bool grant=!(be32(buffer,1)==1 && be32(buffer,5)==4);
         if(!grant) releaseInput();
         controlling=grant; setStatus(grant?"Connected — controlling":"Connected — view only");
@@ -306,8 +321,8 @@ bool Session::consumeMessage() {
     buffer.remove(0,length); return true;
 }
 void Session::requestFrame() {
-    if(!connected() || pending) return;
-    const bool full=forceFull || frameInterval<=33 || fullFrame.elapsed()>=5000;
+    if(!connected() || pending || !streaming) return;
+    const bool full=forceFull || fullSeconds<0 || (fullSeconds>0 && fullFrame.elapsed()>=fullSeconds*1000);
     forceFull=false; pending=true;
     send(updateRequest(decoder->image().size(),!full));
     if(full) fullFrame.restart();
@@ -333,5 +348,34 @@ void Session::ctrlAltDelete() {
     releaseInput();
     key(0xe0,true); key(0xe2,true); key(0x4c,true);
     key(0x4c,false); key(0xe2,false); key(0xe0,false);
+}
+}
+
+namespace aten {
+void Session::power(int command) {if(connected() && command>=0 && command<=3) {QByteArray b(2,0);b[0]=0x1a;b[1]=char(command);send(b);}}
+void Session::hotplug() {if(connected()) send(QByteArray(1,0x3a));}
+void Session::combo(const QList<quint32> &keys) {releaseInput();for(auto k:keys) key(k,true);for(auto i=keys.crbegin();i!=keys.crend();++i) key(*i,false);}
+void Session::setDisplay(int q,int mode) {
+    quality=qBound(0,q,11);imageMode=mode==422?422:444;
+    if(connected()) {QByteArray b(5,0);b[0]=0x32;b[2]=char(quality);put16(b,3,quint16(imageMode));send(b);refresh();}
+}
+void Session::setStreaming(bool active,int interval,int full) {
+    const bool resumed=!streaming && active;streaming=active;frameInterval=qBound(0,interval,1000);fullSeconds=qBound(-1,full,60);
+    if(!active) nextFrame.stop();else {if(resumed) forceFull=true;requestFrame();}
+}
+QString Session::information() const {
+    const double seconds=uptime.isValid()?uptime.elapsed()/1000.0:0;
+    const auto size=decoder?decoder->image().size():QSize();
+    return QString("Endpoint: %1:%2\nTransport: %3\nDisplay: %4 × %5\nInput: %6\nFrames: %7\nAverage FPS: %8\nVideo received: %9 MiB\nUptime: %10 seconds\n%11")
+        .arg(mediaLaunch.host).arg(mediaLaunch.port).arg(mediaLaunch.tls?"TLS 1.2":"Plain TCP")
+        .arg(size.width()).arg(size.height()).arg(controlling?"Controlling":"View only").arg(frames)
+        .arg(seconds>0?frames/seconds:0,0,'f',1).arg(videoBytes/1048576.0,0,'f',2).arg(int(seconds)).arg(statusText);
+}
+}
+
+namespace aten {
+void Session::setAutoReconnect(bool enabled,const QVariantMap &options) {
+    if(enabled && options.value("autoArm",true).toBool()) reconnectOptions=options;
+    else {reconnectOptions.clear();if(phase==Phase::Reconnecting) close();}
 }
 }

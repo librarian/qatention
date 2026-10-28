@@ -15,6 +15,8 @@ public:
     const QImage &image() const { return frame; }
 private:
     QImage frame;
+    QByteArray palette=QByteArray(1024,0);
+    bool decodePlanes(const QByteArray &packet);
     void *context=nullptr;
 };
 }

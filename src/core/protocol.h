@@ -16,7 +16,7 @@ QByteArray updateRequest(QSize size, bool incremental);
 QByteArray credentials(const QString &user, const QString &password);
 struct Launch {
     QString host, user, password;
-    quint16 port = 5900;
+    quint16 port = 5900, mediaPort = 623;
     bool tls = true;
 };
 Launch parseJnlp(const QByteArray &xml);

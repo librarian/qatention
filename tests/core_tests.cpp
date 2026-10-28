@@ -8,6 +8,8 @@
 #include "core/session.h"
 #include "core/profiles.h"
 #include "core/debuglog.h"
+#include "core/media.h"
+#include <QMessageAuthenticationCode>
 #include <QTemporaryDir>
 #include <QFile>
 #include <QSslKey>
@@ -61,7 +63,13 @@ private slots:
         QVERIFY(p.save("Office", {{"host","bmc"},{"user","admin"},{"password","SECRET"},{"unexpected","SECRET"}}));
         Profiles loaded(path); QCOMPARE(loaded.entries().size(),1);
         QCOMPARE(loaded.entries()[0].toMap().value("user").toString(),QString("admin"));
-        QFile f(path); QVERIFY(f.open(QIODevice::ReadOnly)); QVERIFY(f.readAll().contains("SECRET")); f.close();
+        QFile f(path); QVERIFY(f.open(QIODevice::ReadOnly)); const auto stored=f.readAll();
+#ifdef Q_OS_WIN
+        QVERIFY(!stored.contains("SECRET"));QVERIFY(stored.contains("protectedPassword"));
+#else
+        QVERIFY(stored.contains("SECRET"));
+#endif
+        QCOMPARE(loaded.entries()[0].toMap().value("password").toString(),QString("SECRET"));f.close();
         QVERIFY(p.save("Office", {{"host","bmc2"},{"autoArm",false},{"user","TOKEN"},{"password","SECRET"}}));
         Profiles manual(path); QCOMPARE(manual.entries().size(),1); QCOMPARE(manual.entries()[0].toMap().value("user").toString(),QString("TOKEN"));
         QCOMPARE(manual.entries()[0].toMap().value("password").toString(),QString("SECRET"));
@@ -171,16 +179,82 @@ private slots:
         QVERIFY(s.status().contains("HTTPS certificate validation failed")); QCOMPARE(web.logins,0);
         s.open(options); QTRY_VERIFY(console.hasPendingConnections());
         auto *peer=console.nextPendingConnection(); handshake(peer,1);
-        peer->abort(); QTRY_VERIFY(s.status().contains("reconnect 1/6"));
-        QTRY_VERIFY_WITH_TIMEOUT(console.hasPendingConnections(),5000);
+        peer->abort(); QTRY_VERIFY(s.status().contains("reconnect 1/30"));
+        QTRY_VERIFY_WITH_TIMEOUT(console.hasPendingConnections(),7000);
         peer=console.nextPendingConnection(); handshake(peer,2); QCOMPARE(web.logins,2);
-        peer->abort(); QTRY_VERIFY(s.status().contains("reconnect 2/6"));
-        s.close(); QTest::qWait(4200); QCOMPARE(web.logins,2); QCOMPARE(s.status(),QString("Disconnected"));
+        peer->abort(); QTRY_VERIFY(s.status().contains("reconnect 2/30"));
+        s.close(); QTest::qWait(5200); QCOMPARE(web.logins,2); QCOMPARE(s.status(),QString("Disconnected"));
         // A new session that loses its transport must stop if web authentication is rejected.
         s.open(options); QTRY_VERIFY(console.hasPendingConnections());
         peer=console.nextPendingConnection(); handshake(peer,3); web.reject=true; peer->abort();
-        QTRY_VERIFY_WITH_TIMEOUT(!s.busy(),5000); QVERIFY(s.status().contains("check credentials"));
+        QTRY_VERIFY_WITH_TIMEOUT(!s.busy(),7000); QVERIFY(s.status().contains("check credentials"));
         const int attempts=web.logins; QTest::qWait(2200); QCOMPARE(web.logins,attempts);
+    }
+
+    void paletteAndPlaneFrames() {
+        Decoder d;d.resize({8,1});
+        QByteArray palette(1034+8,0);palette[0]=1;palette[1]=1;put32(palette,6,palette.size());
+        for(int i=0;i<256;++i) {palette[10+4*i]=char(i);palette[11+4*i]=char(i*2);palette[12+4*i]=char(i*3);}
+        for(int i=0;i<8;++i) palette[1034+i]=char(i);
+        QVERIFY(d.decode(palette,0));QCOMPARE(d.image().pixel(7,0),qRgb(21,14,7));
+        auto packet=[](int type,const QByteArray &planes,bool full) {
+            QByteArray body(4,0);qToLittleEndian<quint32>(planes.size(),body.data());body+=planes;
+            if(!full) body=QByteArray::fromHex("0100000008010000")+body;
+            QByteArray p(10,0);p[0]=full?1:0;p[1]=char(type);p+=body;put32(p,6,p.size());return p;
+        };
+        QByteArray planes(32,0);planes[15]=4;planes[0]=1;planes[24]=1;
+        QVERIFY(d.decode(packet(4,planes,true),0));QCOMPARE(d.image().pixel(0,0),qRgb(128,128,0));QCOMPARE(d.image().pixel(2,0),qRgb(0,0,1));
+        QVERIFY(d.decode(packet(4,planes,false),0));QCOMPARE(d.image().pixel(2,0),qRgb(0,0,1));
+        planes=QByteArray(16,0);planes[0]=1;planes[15]=1;
+        QVERIFY(d.decode(packet(2,planes,true),0));QCOMPARE(d.image().pixel(0,0),qRgb(128,0,8));
+        auto bad=packet(2,planes,true);bad[10]=char(0xff);QVERIFY_EXCEPTION_THROWN(d.decode(bad,0),Error);
+        bad=packet(4,QByteArray::fromHex("55ff00"),true);QVERIFY_EXCEPTION_THROWN(d.decode(bad,0),Error);
+    }
+    void mediaProtocolAndScsi() {
+        QCOMPARE(mediaControl(8).toHex(),QByteArray("0000000800000000"));
+        const auto attach=mediaAttach("user","pass",0x12345678);
+        QCOMPARE(attach.size(),246);QCOMPARE(attach.mid(44,4).toHex(),QByteArray("78563412"));
+        QCOMPARE(attach.mid(226),QMessageAuthenticationCode::hash(attach.first(226),"userpass",QCryptographicHash::Sha1));
+        QCOMPARE(attach.mid(52,8).toHex(),QByteArray("1212010002000000"));
+        QVERIFY_EXCEPTION_THROWN(mediaAttach(QString(16,'x'),"p",0),Error);
+        QTemporaryDir dir;QFile iso(dir.filePath("test.iso"));QVERIFY(iso.open(QIODevice::WriteOnly));iso.write(QByteArray(2049,'X'));iso.close();
+        CdRom cd(iso.fileName());QCOMPARE(cd.blocks(),quint64(2));
+        QByteArray cdb(16,0);cdb[0]=0x12;auto reply=cd.execute(cdb,36);QCOMPARE(reply.status,quint8(0));QCOMPARE(reply.data.mid(8),QByteArray("IPMI    Virtual CDROM   3000"));
+        cdb[0]=0x25;QCOMPARE(cd.execute(cdb,8).data.toHex(),QByteArray("0000000100000800"));
+        cdb[0]=0x28;put32(cdb,2,1);put16(cdb,7,1);reply=cd.execute(cdb,2048);QCOMPARE(reply.data.size(),2048);QCOMPARE(reply.data[0],'X');QCOMPARE(reply.data.mid(1),QByteArray(2047,0));
+        put32(cdb,2,2);QCOMPARE(cd.execute(cdb,2048).status,quint8(1));
+        cdb.fill(0);cdb[0]=3;reply=cd.execute(cdb,18);QCOMPARE(quint8(reply.data[2]),5);QCOMPARE(quint8(reply.data[12]),0x21);QCOMPARE(quint8(cd.execute(cdb,18).data[2]),0);
+        cdb.fill(0);cdb[0]=0x43;reply=cd.execute(cdb,20);QCOMPARE(reply.data.toHex(),QByteArray("0012010100140100000000000014aa0000000002"));
+        cdb[6]=char(0xaa);cdb[1]=2;QCOMPARE(cd.execute(cdb,12).data.toHex(),QByteArray("000a01010014aa0000000202"));
+        cdb[6]=3;QCOMPARE(cd.execute(cdb,12).status,quint8(1));
+        cdb.fill(0);cdb[0]=0x5a;cdb[2]=0x2a;QCOMPARE(cd.execute(cdb,64).data.size(),38);
+        cdb[0]=0x12;QCOMPARE(cd.execute(cdb,0).data.size(),0);QCOMPARE(cd.execute(cdb,0xffffffff).status,quint8(1));
+        cdb[0]=0x2a;QCOMPARE(cd.execute(cdb,2048).status,quint8(1)); // Never write to the ISO.
+    }
+    void mediaHandshakeReadAndDetach() {
+        QTemporaryDir dir;QFile iso(dir.filePath("test.iso"));QVERIFY(iso.open(QIODevice::WriteOnly));iso.write(QByteArray(2048,'Z'));iso.close();
+        QTcpServer server;QVERIFY(server.listen(QHostAddress::LocalHost));Launch l;l.host="127.0.0.1";l.user="u";l.password="p";l.tls=false;l.mediaPort=server.serverPort();
+        Media m;m.mount(l,false,iso.fileName());
+        QTRY_VERIFY(server.hasPendingConnections());auto *health=server.nextPendingConnection();
+        QTRY_VERIFY(health->bytesAvailable()>=8);QCOMPARE(health->readAll(),mediaControl(8));
+        health->write(mediaControl(9,QByteArray::fromHex("03ffffff")));
+        QTRY_VERIFY(server.hasPendingConnections());auto *init=server.nextPendingConnection();
+        QTRY_VERIFY(init->bytesAvailable()>=8);QCOMPARE(init->readAll(),mediaControl(10));init->write(mediaControl(11));
+        QTRY_VERIFY(server.hasPendingConnections());auto *data=server.nextPendingConnection();
+        QTRY_VERIFY(server.hasPendingConnections());health=server.nextPendingConnection();
+        QTRY_VERIFY(health->bytesAvailable()>=8);QCOMPARE(health->readAll(),mediaControl(8));health->write(mediaControl(9,QByteArray::fromHex("03ffffff")));
+        QTRY_VERIFY(data->bytesAvailable()>=246);QCOMPARE(data->read(246).size(),246);
+        auto accepted=mediaControl(2,QByteArray(1,0));data->write(accepted.first(7));QTest::qWait(5);QVERIFY(!m.status().startsWith("Mounted:"));data->write(accepted.mid(7));
+        QTRY_VERIFY(m.status().startsWith("Mounted:"));QTRY_VERIFY(data->bytesAvailable()>=16);QCOMPARE(data->readAll(),mediaControl(7,QByteArray::fromHex("0503011002200330")));
+        QByteArray command(39,0);command[0]=0x11;command[2]=2;qToLittleEndian<quint32>(31,command.data()+4);
+        command.replace(8,4,"USBC");qToLittleEndian<quint32>(0x1234,command.data()+12);qToLittleEndian<quint32>(2048,command.data()+16);command[20]=char(0x80);command[22]=10;command[23]=0x28;command[31]=1;
+        data->write(command);QTRY_VERIFY(data->bytesAvailable()>=2077);auto response=data->readAll();
+        QCOMPARE(response.mid(8,2048),QByteArray(2048,'Z'));QCOMPARE(response.mid(2064,4),QByteArray("USBS"));QCOMPARE(quint8(response.last(1)[0]),0);
+        // The media channel does not depend on a video Session lifetime.
+        {Session video;video.close();}QVERIFY(m.busy());
+        m.unmount();QTRY_VERIFY(data->bytesAvailable()>=8);QCOMPARE(data->readAll(),mediaControl(5));data->write(mediaControl(6));QTRY_VERIFY(!m.busy());
+        m.mount(l,false,iso.fileName());QTRY_VERIFY(server.hasPendingConnections());health=server.nextPendingConnection();
+        QTRY_VERIFY(health->bytesAvailable()>=8);health->readAll();health->write(mediaControl(9,QByteArray::fromHex("03ff01ff")));QTRY_VERIFY(!m.busy());QVERIFY(m.status().contains("occupied"));
     }
     void cancelConnection() {
         QTcpServer server;QVERIFY(server.listen(QHostAddress::LocalHost));

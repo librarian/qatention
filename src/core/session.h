@@ -27,8 +27,21 @@ public:
     Q_INVOKABLE void releaseInput();
     Q_INVOKABLE void ctrlAltDelete();
     void key(quint32 usage, bool down);
+    Launch mediaEndpoint() const { return mediaLaunch; }
+    bool untrustedAllowed() const { return allowUntrusted; }
+    void power(int command);
+    void hotplug();
+    void combo(const QList<quint32> &keys);
+    void setDisplay(int quality,int mode);
+    void setAutoReconnect(bool enabled,const QVariantMap &options);
+    void setStreaming(bool active,int interval,int fullSeconds);
+    QString information() const;
+    QStringList users() const { return sessionUsers; }
+    int hostPower() const { return powerState; }
+    bool keepMedia=false;
     void pointer(int x,int y,int buttons);
 signals:
+    void videoPacket(const QByteArray &packet,quint32 encoding);
     void diagnostic(const QString &message);
     void unsupportedFrame(const QByteArray &packet);
     void stateChanged();
@@ -47,7 +60,12 @@ private:
     int retryCount=0;
     QElapsedTimer received, fullFrame;
     QByteArray buffer;
-    Launch launch;
+    Launch launch,mediaLaunch;
+    QStringList sessionUsers,userBurst;
+    int powerState=-1,quality=11,imageMode=444,fullSeconds=5;
+    bool streaming=true;
+    quint64 videoBytes=0,frames=0;
+    QElapsedTimer uptime,powerPoll;
     std::unique_ptr<Decoder> decoder;
     QUrl baseUrl;
     bool allowUntrusted=false, switchJava=false, controlling=true, pending=false, forceFull=false;

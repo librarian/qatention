@@ -1,5 +1,6 @@
 #include "decoder.h"
 #include "protocol.h"
+#include <QtEndian>
 #include <QMutex>
 #include <QMutexLocker>
 #include <cstring>
@@ -50,7 +51,7 @@ bool Decoder::decode(const QByteArray &p, quint32 encoding) {
         return map.contains(char(1));
     }
     if(p.size()<10) throw Error("Truncated ATEN header");
-    if(p[1]!=0) throw Error("This preview supports Hermon type 0 and ASPEED video; other ATEN codecs are pending");
+    if(p[1]!=0) return decodePlanes(p);
     if(p[0]==1) {
         if(p.size()-10 < qsizetype(frame.width())*frame.height()*2) throw Error("Truncated Hermon keyframe");
         for(int y=0;y<frame.height();++y) {
@@ -71,5 +72,88 @@ bool Decoder::decode(const QByteArray &p, quint32 encoding) {
         }
     }
     return count!=0;
+}
+}
+
+namespace aten {
+static QByteArray expandRle(const QByteArray &input,int size) {
+    QByteArray out(size,0);qsizetype pos=0,dest=0;
+    auto write=[&](char value,int count) {
+        if(count>out.size()-dest) throw Error("RLE output exceeds frame");
+        std::memset(out.data()+dest,quint8(value),size_t(count));dest+=count;
+    };
+    while(pos<input.size()) {
+        pos=(pos+3)&~qsizetype(3);if(pos==input.size()) break;
+        if(input.size()-pos<4) throw Error("Truncated RLE chunk header");
+        const auto n=qFromLittleEndian<quint32>(input.constData()+pos);pos+=4;
+        if(n>input.size()-pos) throw Error("Truncated RLE chunk");
+        const qsizetype end=pos+n;
+        while(pos<end) {
+            const auto lead=quint8(input[pos++]);
+            if(pos==end) {write(char(lead),1);continue;}
+            if(lead==0x55) {
+                const auto count=quint8(input[pos++]);
+                if(count<=1) write(count==0?char(0x55):char(0xaa),1);
+                else {if(pos==end) throw Error("Truncated RLE run");write(input[pos++],count+1);}
+            } else if(lead==0xaa) write(input[pos++],3);
+            else write(char(lead),1);
+        }
+    }
+    // Zero the unwritten tail rather than reusing pixels from an earlier frame.
+    return out;
+}
+static QRgb planePixel(const QByteArray &planes,int base,int pixels,int n,bool type4) {
+    const int stride=(pixels+7)/8;
+    auto assemble=[&](int group) {int v=0;for(int k=0;k<8;++k) v|=((quint8(planes[base+(group+7-k)*stride+(n>>3)])>>(n&7))&1)<<k;return v;};
+    if(type4) return qRgb(assemble(24),assemble(0),assemble(8));
+    const int low=assemble(8),high=assemble(0);
+    // Type 2 uses the vendor's packed conversion, distinct from raw Hermon RGB555.
+    return qRgb(high&0xf8,((low>>3&0x1c)|(high<<5))&255,(low<<3)&255);
+}
+bool Decoder::decodePlanes(const QByteArray &p) {
+    const int type=quint8(p[1]),subtype=quint8(p[2]);
+    const bool hasPalette=(type==1 && subtype==0) || type==5;
+    const int offset=hasPalette?1034:10;const quint32 total=be32(p,6);
+    if(total<quint32(offset) || total>quint32(p.size())) throw Error("Invalid video payload length");
+    if(hasPalette) palette=p.mid(10,1024);
+    const auto payload=p.mid(offset,total-offset);
+    const int pixels=frame.width()*frame.height();
+    if(p[0]==1) {
+        if(subtype==2 || (subtype==0 && type==1)) {
+            const bool nibble=subtype==2;
+            if(payload.size()<(pixels+(nibble?1:0))/(nibble?2:1)) throw Error("Truncated palette frame");
+            for(int n=0;n<pixels;++n) {
+                const auto v=quint8(payload[n/(nibble?2:1)]);
+                const int index=nibble?((v>>((n%2)*4))&15):v;
+                reinterpret_cast<QRgb*>(frame.scanLine(n/frame.width()))[n%frame.width()]=qRgb(quint8(palette[index*4+2]),quint8(palette[index*4+1]),quint8(palette[index*4]));
+            }
+            return true;
+        }
+        if(subtype!=0 || (type!=2 && type!=4)) throw Error("Unsupported ATEN full-frame encoding");
+        const auto planes=expandRle(payload,(type==4?32:16)*((pixels+7)/8));
+        for(int n=0;n<pixels;++n) reinterpret_cast<QRgb*>(frame.scanLine(n/frame.width()))[n%frame.width()]=planePixel(planes,0,pixels,n,type==4);
+        return true;
+    }
+    if(type!=2 && type!=4) throw Error("Unsupported ATEN incremental encoding");
+    if(payload.size()<4) throw Error("Truncated tile table");
+    const int count=qFromLittleEndian<quint16>(payload.constData()),start=count*4+4;
+    if(start>payload.size()) throw Error("Truncated tile table");
+    int totalPlanes=0;const int planeSlots=type==4?32:16;
+    for(int t=0;t<count;++t) {
+        const int at=2+t*4,w=quint8(payload[at+2]),h=quint8(payload[at+3]);
+        const int bytes=planeSlots*((w*h+7)/8);
+        if(totalPlanes>64*1024*1024-bytes) throw Error("Tile expansion limit exceeded");
+        totalPlanes+=bytes;
+    }
+    const auto planes=expandRle(payload.mid(start),totalPlanes);int pos=0;
+    for(int t=0;t<count;++t) {
+        const int at=2+t*4,y=quint8(payload[at]),x=quint8(payload[at+1]),w=quint8(payload[at+2]),h=quint8(payload[at+3]);
+        for(int row=0;row<h && y+row<frame.height();++row) {
+            auto *line=reinterpret_cast<QRgb*>(frame.scanLine(y+row));
+            for(int col=0;col<w && x+col<frame.width();++col) line[x+col]=planePixel(planes,pos,w*h,row*w+col,type==4);
+        }
+        pos+=planeSlots*((w*h+7)/8);
+    }
+    return count>0;
 }
 }

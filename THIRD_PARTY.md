@@ -19,10 +19,9 @@ linked into the application, independently of the dynamically linked Qt librarie
 `resources/client.pfx` is the **public vendor-distributed** generic Supermicro iKVM
 client identity already embedded by ATENtion, from X10 AST2400 firmware 04.07.
 It is not a user's BMC credential. It does not pin or verify the server certificate.
-Firmware expecting a different vendor identity may require a future override UI.
+A client.pfx beside the executable overrides this identity.
 
-Qt is dynamically linked. This port uses Qt Core, Gui, Network, Qml, Quick and
-Quick Controls 2, plus Qt Test for tests. Qt and its bundled dependencies retain
+Qt is dynamically linked. This port uses Qt Core, Gui, Network and Widgets, plus Qt Test for tests. Qt and its bundled dependencies retain
 their own licenses; see https://doc.qt.io/qt-6.8/licensing.html . Development
 archives include Qt's LGPL/GPL license texts. Exact Qt source releases are at
 https://download.qt.io/archive/qt/6.8/6.8.3/single/ . Do not treat the application's

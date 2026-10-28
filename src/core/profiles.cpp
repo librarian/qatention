@@ -6,6 +6,10 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <wincrypt.h>
+#endif
 namespace aten {
 QVariantMap Profiles::sanitize(const QVariantMap &o) {
     QVariantMap result;
@@ -26,14 +30,37 @@ Profiles::Profiles(QString file,QObject *parent):QObject(parent),path(std::move(
     }
     for(auto entry:doc.object().value("profiles").toArray()) {
         auto o=entry.toObject().toVariantMap();
-        auto clean=sanitize(o); clean["name"]=o.value("name"); items.append(clean);
+        auto clean=sanitize(o);
+#ifdef Q_OS_WIN
+        if(o.contains("protectedPassword")) {
+            auto encrypted=QByteArray::fromBase64(o.value("protectedPassword").toString().toLatin1());
+            DATA_BLOB input{DWORD(encrypted.size()),reinterpret_cast<BYTE*>(encrypted.data())},output{};
+            if(CryptUnprotectData(&input,nullptr,nullptr,nullptr,nullptr,CRYPTPROTECT_UI_FORBIDDEN,&output)) {
+                clean["password"]=QString::fromUtf8(reinterpret_cast<char*>(output.pbData),output.cbData);LocalFree(output.pbData);
+            } else {clean["password"]=QString();problem="A saved password could not be decrypted for this Windows account.";}
+        }
+#else
+        if(o.contains("protectedPassword")) {clean["password"]=QString();problem="Windows-protected passwords must be re-entered on this platform.";}
+#endif
+        clean["name"]=o.value("name"); items.append(clean);
     }
 }
 bool Profiles::write(const QVariantList &next) {
     if(!readable) { emit changed(); return false; }
     QDir().mkpath(QFileInfo(path).absolutePath());
+    auto stored=next;
+#ifdef Q_OS_WIN
+    for(auto &item:stored) {
+        auto entry=item.toMap();auto secret=entry.take("password").toString().toUtf8();
+        DATA_BLOB input{DWORD(secret.size()),reinterpret_cast<BYTE*>(secret.data())},output{};
+        if(!CryptProtectData(&input,L"QATENtion profile",nullptr,nullptr,nullptr,CRYPTPROTECT_UI_FORBIDDEN,&output)) {
+            problem="Windows could not protect the profile password.";emit changed();return false;
+        }
+        entry["protectedPassword"]=QString::fromLatin1(QByteArray(reinterpret_cast<char*>(output.pbData),output.cbData).toBase64());LocalFree(output.pbData);item=entry;
+    }
+#endif
     QSaveFile f(path);
-    const auto bytes=QJsonDocument(QJsonObject{{"version",1},{"profiles",QJsonArray::fromVariantList(next)}}).toJson();
+    const auto bytes=QJsonDocument(QJsonObject{{"version",1},{"profiles",QJsonArray::fromVariantList(stored)}}).toJson();
     if(!f.open(QIODevice::WriteOnly) || !f.setPermissions(QFileDevice::ReadOwner|QFileDevice::WriteOwner) || f.write(bytes)!=bytes.size() || !f.commit()) {
         problem="Cannot save profiles: "+f.errorString(); emit changed(); return false;
     }
