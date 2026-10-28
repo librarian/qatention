@@ -65,6 +65,8 @@ jobs:
           export PATH="$PWD/osxcross/bin:$PATH"
           cmake --build build --parallel 3
           cmake --install build --prefix "$PWD/dist"
+      - name: Test signature hash validation
+        run: python tests/test_macos_signature.py
       - name: Bundle, sign and verify dependencies
         run: |
           export PATH="$PWD/osxcross/bin:$PATH"

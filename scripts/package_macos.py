@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+from verify_macos_signature import verify
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--qt', required=True, type=Path)
@@ -90,7 +91,7 @@ if not (plugins / 'tls/libqsecuretransportbackend.dylib').is_file():
 # Use an ad-hoc signature: no Developer ID credentials or notarization implied.
 subprocess.run([str(signer), 'sign', str(bundle)], check=True)
 for binary in sorted(checked):
-    subprocess.run([str(signer), 'verify', str(binary)], check=True)
+    verify(binary)
 for link in bundle.rglob('*'):
     if link.is_symlink() and not link.exists():
         raise RuntimeError(f'Broken bundle link: {link}')

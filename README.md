@@ -162,6 +162,6 @@ Developer ID signing or notarization. macOS may require Privacy & Security >
 Open Anyway after the first launch attempt. The ZIP includes MACOS-TESTING.txt.
 The CLI is inside qatention.app/Contents/MacOS/qatention-capture.
 
-CI checks architectures, bundled library dependencies, signatures and symlinks;
+CI checks architectures, bundled library dependencies, signature code-page hashes and symlinks;
 it cannot run the macOS application. Login, TLS, video, input and media need testing
 on a Mac. macOS currently stores profile credentials in owner-readable JSON.
