@@ -61,13 +61,7 @@ jobs:
             curl --fail --location "https://raw.githubusercontent.com/qt/qtbase/v6.8.3/LICENSES/$name.txt" -o "dist/licenses/qt/$name.txt"
           done
       - name: Test installed application
-        shell: bash
-        run: |
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            dist/bin/qatention.exe --smoke-test
-          else
-            dist/bin/qatention --smoke-test
-          fi
+        run: python scripts/smoke_installed.py dist
       - name: Archive
         shell: bash
         run: tar -czf "qatention-${{ matrix.label }}.tar.gz" -C dist .
