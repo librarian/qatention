@@ -15,6 +15,7 @@ ApplicationWindow {
     palette.windowText: "#e4e9ed"
     palette.base: "#15191e"
     palette.text: "#e4e9ed"
+    palette.placeholderText: "#aab4be"
     palette.button: "#35404b"
     palette.buttonText: "#e4e9ed"
     palette.highlight: "#4b91c8"
@@ -67,6 +68,7 @@ ApplicationWindow {
         title: "Connect to a BMC"
         anchors.centerIn: parent
         width: Math.min(560, window.width - 40)
+        height: Math.min(implicitHeight, window.height - 40)
         modal: true
         standardButtons: Dialog.Ok | Dialog.Cancel
         onAccepted: {
@@ -96,7 +98,14 @@ ApplicationWindow {
             reconnect.checked = p.autoReconnect !== false
         }
         onRejected: password.clear()
-        contentItem: ColumnLayout {
+        contentItem: ScrollView {
+            id: connectionScroll
+            implicitHeight: connectionFields.implicitHeight
+            contentWidth: availableWidth
+            clip: true
+            ColumnLayout {
+            id: connectionFields
+            width: connectionScroll.availableWidth
             spacing: 6
             RowLayout {
                 ComboBox {
@@ -150,6 +159,7 @@ ApplicationWindow {
             Label {
                 Layout.fillWidth: true; wrapMode: Text.Wrap
                 text: "Preview: one console, US keyboard mapping, Hermon/ASPEED video. Virtual media is not yet ported."
+            }
             }
         }
     }
