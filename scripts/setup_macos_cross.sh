@@ -13,7 +13,7 @@ curl --fail --location --retry 3 https://github.com/joseluisq/macosx-sdks/releas
 printf '%s  %s\n' 6e146275d19f027faa2e8354da5e0267513abf013b8f16ad65a231653a2b1c5d "$sdk" | sha256sum --check
 (
     cd "$work/osxcross"
-    UNATTENDED=1 BUILD_FLAVOR=llvm ENABLE_ARCHS="arm64 x86_64" OSX_VERSION_MIN=12.0 TARGET_DIR="$destination" ./build.sh
+    UNATTENDED=1 BUILD_FLAVOR=llvm ENABLE_REPLACEMENT_LIPO=0 ENABLE_ARCHS="arm64 x86_64" OSX_VERSION_MIN=12.0 TARGET_DIR="$destination" ./build.sh
 )
 signer="$work/rcodesign.tar.gz"
 curl --fail --location --retry 3 https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign/0.29.0/apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz -o "$signer"
