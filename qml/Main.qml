@@ -54,23 +54,76 @@ ApplicationWindow {
         Label { text: "Check that a frame is available and the destination is writable." }
     }
     Dialog {
+        id: deleteProfile; title: "Delete saved profile?"
+        anchors.centerIn: parent; modal: true; standardButtons: Dialog.Ok | Dialog.Cancel
+        onAccepted: {
+            if (profilePicker.currentIndex >= 0 && profiles.remove(profiles.entries[profilePicker.currentIndex].name))
+                profilePicker.currentIndex = -1
+        }
+    }
+    Dialog {
         id: connection
+        objectName: "connectionDialog"
         title: "Connect to a BMC"
         anchors.centerIn: parent
         width: Math.min(560, window.width - 40)
         modal: true
         standardButtons: Dialog.Ok | Dialog.Cancel
         onAccepted: {
-            kvm.open({host: host.text, user: user.text, password: password.text,
-                autoArm: autoArm.checked, port: port.value, tls: tls.checked,
-                webPort: webPort.value, allowUntrusted: untrusted.checked,
-                switchJava: javaMode.checked, frameInterval: continuous.checked ? 33 : 100})
+            kvm.open(options())
             password.clear()
             console.forceActiveFocus()
         }
+        function options() {
+            return {host: host.text, user: user.text, password: password.text,
+                autoArm: autoArm.checked, port: port.value, tls: tls.checked,
+                webPort: webPort.value, allowUntrusted: untrusted.checked,
+                switchJava: javaMode.checked, autoReconnect: reconnect.checked,
+                frameInterval: continuous.checked ? 33 : 100}
+        }
+        function loadProfile(p) {
+            password.clear()
+            profileName.text = p.name || ""
+            host.text = p.host || ""
+            autoArm.checked = p.autoArm !== false
+            user.text = p.user || ""
+            port.value = p.port || 5900
+            webPort.value = p.webPort || 443
+            tls.checked = p.tls !== false
+            untrusted.checked = p.allowUntrusted === true
+            javaMode.checked = p.switchJava === true
+            continuous.checked = p.frameInterval === 33
+            reconnect.checked = p.autoReconnect !== false
+        }
         onRejected: password.clear()
         contentItem: ColumnLayout {
-            spacing: 10
+            spacing: 6
+            RowLayout {
+                ComboBox {
+                    id: profilePicker; Layout.fillWidth: true
+                    model: profiles.entries; textRole: "name"; currentIndex: -1
+                    displayText: currentIndex < 0 ? "Choose a saved profile…" : currentText
+                    onActivated: connection.loadProfile(profiles.entries[currentIndex])
+                }
+                Button { text: "New"; onClicked: { profilePicker.currentIndex = -1; connection.loadProfile({}) } }
+                Button {
+                    text: "Delete"; enabled: profilePicker.currentIndex >= 0
+                    onClicked: deleteProfile.open()
+                }
+            }
+            RowLayout {
+                TextField { id: profileName; Layout.fillWidth: true; placeholderText: "Profile name (same name updates it)" }
+                Button {
+                    text: "Save profile"
+                    onClicked: {
+                        if (profiles.save(profileName.text, connection.options())) {
+                            for (let i = 0; i < profiles.entries.length; ++i)
+                                if (profiles.entries[i].name === profileName.text.trim()) profilePicker.currentIndex = i
+                        }
+                    }
+                }
+            }
+            Label { Layout.fillWidth: true; visible: text.length > 0; text: profiles.error; color: "#ffaaaa"; wrapMode: Text.Wrap }
             TextField { id: host; Layout.fillWidth: true; placeholderText: "BMC hostname or IP address" }
             CheckBox { id: autoArm; text: "Log in through the BMC web interface"; checked: true }
             TextField { id: user; Layout.fillWidth: true; placeholderText: autoArm.checked ? "BMC username" : "KVM username token" }
@@ -88,6 +141,7 @@ ApplicationWindow {
             }
             CheckBox { id: untrusted; text: "Allow an unverified BMC certificate" }
             CheckBox { id: javaMode; visible: autoArm.checked; text: "Switch the BMC console interface to Java" }
+            CheckBox { id: reconnect; visible: autoArm.checked; checked: true; text: "Reconnect automatically after a dropped connection" }
             CheckBox { id: continuous; text: "Request updates up to 30 times per second" }
             Label {
                 Layout.fillWidth: true; wrapMode: Text.Wrap
@@ -95,7 +149,7 @@ ApplicationWindow {
             }
             Label {
                 Layout.fillWidth: true; wrapMode: Text.Wrap
-                text: "Preview: one console, US keyboard mapping, Hermon/ASPEED video. Virtual media and saved profiles are not yet ported."
+                text: "Preview: one console, US keyboard mapping, Hermon/ASPEED video. Virtual media is not yet ported."
             }
         }
     }

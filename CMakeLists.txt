@@ -13,7 +13,8 @@ set_target_properties(aspeed PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_library(qatention_core STATIC
     src/core/decoder.cpp src/core/decoder.h
     src/core/protocol.cpp src/core/protocol.h
-    src/core/session.cpp src/core/session.h)
+    src/core/session.cpp src/core/session.h
+    src/core/profiles.cpp src/core/profiles.h)
 target_include_directories(qatention_core PUBLIC src)
 target_link_libraries(qatention_core PUBLIC Qt6::Core Qt6::Gui Qt6::Network PRIVATE aspeed)
 qt_add_resources(qatention_core vendor_certificate PREFIX / FILES resources/client.pfx)

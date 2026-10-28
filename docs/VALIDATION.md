@@ -13,14 +13,27 @@ Verified locally:
 - Fragmented TCP handshake and frame delivery against an in-process mock BMC.
 - Keyboard release, view-only input suppression, hostile payload length rejection,
   and cancellation during connection establishment.
+- Profile persistence, updates/deletion, exclusion of passwords and manual tokens,
+  and refusal to overwrite unreadable/corrupt storage.
+- Local HTTPS mock BMC: fresh tokens after a dropped console, increasing retry delay,
+  cancellation during backoff, and stopping after web authentication rejection.
 - Qt Quick UI loads with the software renderer; the bundled mutual-TLS client
   identity imports successfully with the local TLS backend.
 - Installed application passes the same headless smoke test without the Qt SDK
   in its runtime library path (OS libraries are still required).
 
-Not yet verified: a live BMC, sustained video performance, physical keyboard/mouse
-behavior, HTTPS web arming against hardware, full mutual-TLS negotiation, or
-Windows/macOS binaries in this initial local verification. The desktop build workflow
-now checks Linux and Windows; consult its run results for current platform status.
+Windows user validation: the user reports that the Windows build works, and the
+provided screenshot shows a live host console with the status "Connected —
+controlling". This confirms connection and video rendering on that tested setup.
+The screenshot alone does not establish the transport/authentication mode or
+complete keyboard/mouse behavior.
+
+Linux and Windows CI builds, protocol/decoder tests and installed-package smoke
+tests passed at commit `b753720`. The package checks remove the Qt SDK's runtime
+paths before starting the installed application.
+
+Not yet verified: sustained video performance, all physical keyboard/mouse paths,
+HTTPS web arming and mutual TLS on hardware as separate test cases, or interactive
+Linux behavior. Consult the desktop workflow for current build/test status.
 macOS builds and verification are deferred.
 Synthetic decoder tests do not establish correctness for all ASPEED bitstreams.

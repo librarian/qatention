@@ -9,6 +9,8 @@
 #include <QFile>
 #include <QQuickWindow>
 #include "core/session.h"
+#include "core/profiles.h"
+#include <QStandardPaths>
 #include "ui/console.h"
 
 int main(int argc,char **argv) {
@@ -22,12 +24,16 @@ int main(int argc,char **argv) {
     qmlRegisterType<Console>("QATENtion.Console",1,0,"Console");
     qmlRegisterUncreatableType<aten::Session>("QATENtion.Console",1,0,"Session","Provided by the application");
     aten::Session session;
+    aten::Profiles profiles(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)+"/profiles.json");
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("kvm",&session);
+    engine.rootContext()->setContextProperty("profiles",&profiles);
     engine.loadFromModule("QATENtion","Main");
     if(engine.rootObjects().isEmpty()) return 1;
     QObject::connect(&app,&QCoreApplication::aboutToQuit,&session,&aten::Session::close);
     if(app.arguments().contains("--smoke-test")) {
+        auto *dialog=engine.rootObjects().first()->findChild<QObject*>("connectionDialog");
+        if(!dialog || !QMetaObject::invokeMethod(dialog,"open")) return 4;
         QFile pfx(":/resources/client.pfx"); pfx.open(QIODevice::ReadOnly);
         QSslKey key; QSslCertificate cert;
         if(!QSslSocket::supportsSsl() || !QSslCertificate::importPkcs12(&pfx,&key,&cert)) return 2;

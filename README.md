@@ -9,11 +9,11 @@ Windows x64 and Linux x64. macOS builds are deferred; Android is outside this fi
 Implemented: HTTPS web login and console token acquisition, manual token login,
 direct mutual TLS, Hermon type-0 full frames and incremental tiles, ASPEED AJPG,
 absolute mouse input, basic US keyboard mapping, Ctrl+Alt+Del, fit-to-window display,
-fullscreen, PNG screenshots, connection timeouts, and input release on focus loss.
+fullscreen, PNG screenshots, saved connection profiles, automatic reconnect,
+connection timeouts, and input release on focus loss.
 The Java-console interface switch is opt-in in the connection dialog.
 
-Not yet ported: virtual media, multiple tabs, saved profiles/OS credential stores,
-automatic reconnect, power controls, clipboard typing, non-US/physical keyboard
+Not yet ported: virtual media, multiple tabs, OS credential stores, power controls, clipboard typing, non-US/physical keyboard
 layouts and lock-key synchronization, and the less common palette/bit-plane ATEN
 codecs. Unknown protocol or unsupported video formats close the connection with
 an error. This is a first functional port, not feature parity with ATENtion.
@@ -65,8 +65,24 @@ The workflow is also runnable manually from GitHub Actions.
 
 ## Connect
 
-Enter the BMC host and web credentials; HTTPS is the default. Credentials and
+Enter the BMC host and web credentials; HTTPS is the default. Passwords and
 single-use tokens remain in memory and are not saved in settings or logs.
+
+Use **Save profile** in the connection dialog to store a named host and connection
+settings, including the web username. Saving the same name updates it. Select a
+profile to load it, or use Delete to remove it. Passwords must be entered again;
+manual-mode profiles save neither token. Profiles live in `profiles.json` under
+Qt's application configuration directory (`%LOCALAPPDATA%/qatention/QATENtion`
+on Windows, `$XDG_CONFIG_HOME/qatention/QATENtion` or
+`~/.config/qatention/QATENtion` on Linux).
+
+Automatic reconnect applies only after a web-login console has connected.
+Dropped connections trigger up to six attempts, after 2, 4, 8, 16, 30 and 30
+seconds. Each attempt logs in again for fresh console tokens. Receiving a console
+message resets the retry budget. Authentication rejection, TLS errors and invalid
+protocol data stop retries; Disconnect cancels pending attempts and forgets the
+in-memory password. Manual-token connections require fresh tokens and do not retry.
+
 If the BMC uses a self-signed certificate, the connection dialog has an explicit
 option to allow an unverified certificate for that connection. The bundled vendor
 client certificate authenticates the client; it does **not** authenticate the BMC.

@@ -15,19 +15,25 @@ namespace aten {
 static constexpr qsizetype MaxPacket=32*1024*1024;
 Session::Session(QObject *parent):QObject(parent) {
     initCertificateResource();
+    retry.setSingleShot(true);
+    connect(&retry,&QTimer::timeout,this,[this]{startAttempt(reconnectOptions);});
     deadline.setSingleShot(true); nextFrame.setSingleShot(true);
-    connect(&deadline,&QTimer::timeout,this,[this]{fail("Connection or handshake timed out");});
+    connect(&deadline,&QTimer::timeout,this,[this]{fail("Connection or handshake timed out",true);});
     connect(&nextFrame,&QTimer::timeout,this,&Session::requestFrame);
     heartbeat.setInterval(3000);
     connect(&heartbeat,&QTimer::timeout,this,[this]{
         if(!connected()) return;
-        if(received.elapsed()>30000) { fail("BMC stopped responding"); return; }
+        if(received.elapsed()>30000) { fail("BMC stopped responding",true); return; }
         send(QByteArray::fromHex("150000000100000000"));
         if(!pending) requestFrame();
     });
 }
 void Session::setStatus(const QString &text) { statusText=text; emit stateChanged(); }
 void Session::close() {
+    retry.stop(); reconnectOptions.clear(); established=false; retryCount=0;
+    resetTransport();
+}
+void Session::resetTransport() {
     if(closing) return;
     QScopedValueRollback guard(closing,true);
     releaseInput();
@@ -53,9 +59,22 @@ void Session::close() {
     buffer.clear(); launch={}; decoder.reset(); pending=false; forceFull=false; controlling=true;
     phase=Phase::Idle; emit clearFrame(); setStatus("Disconnected");
 }
-void Session::fail(const QString &text) { close(); setStatus(text); }
+void Session::fail(const QString &text,bool transient) {
+    if(closing) return;
+    if(transient && established && !reconnectOptions.isEmpty() && retryCount<6) {
+        resetTransport();
+        const int seconds=qMin(30,2<<retryCount++);
+        phase=Phase::Reconnecting;
+        setStatus(text+QString(" — reconnect %1/6 in %2 seconds (Disconnect cancels)").arg(retryCount).arg(seconds));
+        retry.start(seconds*1000);
+    } else { close(); setStatus(text); }
+}
 void Session::open(const QVariantMap &o) {
     close();
+    if(o.value("autoArm",true).toBool() && o.value("autoReconnect",true).toBool()) reconnectOptions=o;
+    startAttempt(o);
+}
+void Session::startAttempt(const QVariantMap &o) {
     try {
         allowUntrusted=o.value("allowUntrusted").toBool(); switchJava=o.value("switchJava").toBool();
         frameInterval=qBound(33,o.value("frameInterval",100).toInt(),1000);
@@ -99,7 +118,7 @@ void Session::requestWeb(const QString &path,const QByteArray &body,int step,con
     connect(r,&QNetworkReply::finished,this,[this,r,step,epoch]{
         if(epoch!=generation) { r->deleteLater(); return; }
         reply=nullptr; r->deleteLater();
-        if(r->error()!=QNetworkReply::NoError) { fail("BMC web request failed: "+r->errorString()); return; }
+        if(r->error()!=QNetworkReply::NoError) { fail("BMC web request failed: "+r->errorString(), r->error()==QNetworkReply::ConnectionRefusedError || r->error()==QNetworkReply::RemoteHostClosedError || r->error()==QNetworkReply::HostNotFoundError || r->error()==QNetworkReply::TimeoutError || r->error()==QNetworkReply::TemporaryNetworkFailureError); return; }
         auto b=r->readAll();
         if(b.size()>1024*1024) { fail("BMC web response is too large"); return; }
         try { handleWeb(b,step); } catch(const std::exception &e) { fail(QString::fromUtf8(e.what())); }
@@ -132,9 +151,9 @@ void Session::connectKvm() {
     decoder=std::make_unique<Decoder>(); socket=new QSslSocket(this);
     socket->setReadBufferSize(MaxPacket+4096);
     connect(socket,&QSslSocket::readyRead,this,&Session::process);
-    connect(socket,&QSslSocket::disconnected,this,[this]{if(busy()) fail("BMC disconnected");});
-    connect(socket,&QSslSocket::errorOccurred,this,[this](QAbstractSocket::SocketError){
-        if(socket) fail("Console connection failed: "+socket->errorString());
+    connect(socket,&QSslSocket::disconnected,this,[this]{if(busy()) fail("BMC disconnected",true);});
+    connect(socket,&QSslSocket::errorOccurred,this,[this](QAbstractSocket::SocketError error){
+        if(socket) fail("Console connection failed: "+socket->errorString(), error!=QAbstractSocket::SslHandshakeFailedError);
     });
     auto begin=[this]{phase=Phase::Banner; deadline.start(15000); setStatus("Authenticating console…"); process();};
     connect(socket,&QSslSocket::connected,this,[this,begin]{
@@ -193,7 +212,7 @@ void Session::process() {
                 if(n>65536) throw Error("Server name is too long");
                 if(buffer.size()<36+n) return;
                 const QSize size(be16(buffer,0),be16(buffer,2)); decoder->resize(size);
-                buffer.remove(0,36+n); phase=Phase::Messages; deadline.stop();
+                buffer.remove(0,36+n); phase=Phase::Messages; established=true; deadline.stop();
                 received.start(); fullFrame.start(); heartbeat.start();
                 setStatus("Connected — click the console to send input");
                 send(QByteArray::fromHex("3732000b01bc070780360001"));
@@ -201,7 +220,7 @@ void Session::process() {
             }
             case Phase::Messages:
                 if(!consumeMessage()) return;
-                received.restart(); break;
+                received.restart(); retryCount=0; break;
             default: return;
             }
         }

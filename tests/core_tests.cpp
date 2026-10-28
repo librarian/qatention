@@ -6,6 +6,10 @@
 #include "core/protocol.h"
 #include "core/decoder.h"
 #include "core/session.h"
+#include "core/profiles.h"
+#include <QTemporaryDir>
+#include <QFile>
+#include <QSslKey>
 
 using namespace aten;
 static QByteArray hermon(int w,int h,quint16 pixel) {
@@ -16,9 +20,54 @@ static QByteArray hermon(int w,int h,quint16 pixel) {
 static QByteArray frameMessage(const QByteArray &p,int w,int h) {
     QByteArray b(24,0);put16(b,2,1);put16(b,8,w);put16(b,10,h);put32(b,20,quint32(p.size()));return b+p;
 }
+class WebBmc : public QTcpServer {
+public:
+    int logins=0;
+    bool reject=false;
+    quint16 consolePort=0;
+    QSslKey key;
+    QSslCertificate cert;
+    void incomingConnection(qintptr descriptor) override {
+        auto *socket=new QSslSocket(this);
+        socket->setSocketDescriptor(descriptor);
+        socket->setLocalCertificate(cert); socket->setPrivateKey(key);
+        socket->setPeerVerifyMode(QSslSocket::VerifyNone);
+        auto data=std::make_shared<QByteArray>();
+        connect(socket,&QSslSocket::readyRead,this,[this,socket,data]{
+            *data+=socket->readAll();
+            if(!data->contains("\r\n\r\n")) return;
+            if(data->startsWith("POST") && !data->contains("pwd=password")) return;
+            QByteArray body,headers;
+            if(data->startsWith("POST /cgi/login.cgi")) {
+                ++logins;
+                if(!reject) headers="Set-Cookie: SID=test; Path=/\r\n";
+            } else if(data->startsWith("GET /cgi/url_redirect")) {
+                body="<jnlp><application-desc><argument>127.0.0.1</argument><argument>token"+QByteArray::number(logins)+"</argument><argument>pass</argument><argument>host</argument><argument>"+QByteArray::number(consolePort)+"</argument><argument>623</argument><argument>1</argument><argument>1</argument><argument>0</argument><argument>5900</argument></application-desc></jnlp>";
+            }
+            socket->write("HTTP/1.1 200 OK\r\n"+headers+"Content-Length: "+QByteArray::number(body.size())+"\r\nConnection: close\r\n\r\n"+body);
+            socket->disconnectFromHost();
+        });
+        connect(socket,&QSslSocket::disconnected,socket,&QObject::deleteLater);
+        socket->startServerEncryption();
+    }
+};
 class CoreTests : public QObject {
     Q_OBJECT
 private slots:
+    void profilesPersistWithoutSecrets() {
+        QTemporaryDir dir; QVERIFY(dir.isValid()); const auto path=dir.filePath("profiles.json");
+        Profiles p(path);
+        QVERIFY(p.save("Office", {{"host","bmc"},{"user","admin"},{"password","SECRET"},{"unexpected","SECRET"}}));
+        Profiles loaded(path); QCOMPARE(loaded.entries().size(),1);
+        QCOMPARE(loaded.entries()[0].toMap().value("user").toString(),QString("admin"));
+        QFile f(path); QVERIFY(f.open(QIODevice::ReadOnly)); QVERIFY(!f.readAll().contains("SECRET")); f.close();
+        QVERIFY(p.save("Office", {{"host","bmc2"},{"autoArm",false},{"user","TOKEN"},{"password","SECRET"}}));
+        Profiles manual(path); QCOMPARE(manual.entries().size(),1); QVERIFY(!manual.entries()[0].toMap().contains("user"));
+        QVERIFY(manual.remove("Office")); Profiles empty(path); QVERIFY(empty.entries().isEmpty());
+        QVERIFY(f.open(QIODevice::WriteOnly)); f.write("broken"); f.close();
+        Profiles broken(path); QVERIFY(!broken.error().isEmpty()); QVERIFY(!broken.save("New",{{"host","bmc"}}));
+        QVERIFY(f.open(QIODevice::ReadOnly)); QCOMPARE(f.readAll(),QByteArray("broken"));
+    }
     void wireVectors() {
         QCOMPARE(keyEvent(0x41beef,true).toHex(),QByteArray("04000100000041beef000000000000000000"));
         QCOMPARE(pointerEvent(0x1234,0x5678,2).toHex(),QByteArray("050002123456780000000000000000000000"));
@@ -89,6 +138,35 @@ private slots:
         // Reject a hostile payload length before allocating or waiting for its body.
         QByteArray huge(24,0);put16(huge,2,1);put32(huge,20,0xffffffff);peer->write(huge);
         QTRY_VERIFY(!s.busy());QVERIFY(s.status().contains("too large"));
+    }
+    void reconnectFreshTokensAndCancel() {
+        Session s; // Initializes the bundled certificate resource.
+        WebBmc web; QFile pfx(":/resources/client.pfx"); QVERIFY(pfx.open(QIODevice::ReadOnly));
+        QVERIFY(QSslCertificate::importPkcs12(&pfx,&web.key,&web.cert));
+        QVERIFY(web.listen(QHostAddress::LocalHost));
+        QTcpServer console; QVERIFY(console.listen(QHostAddress::LocalHost)); web.consolePort=console.serverPort();
+        auto options=QVariantMap{{"host","127.0.0.1"},{"user","admin"},{"password","password"},{"webPort",web.serverPort()},{"allowUntrusted",true}};
+        auto handshake=[&](QTcpSocket *peer,int login) {
+            peer->write("RFB 003.008\n");
+            QTRY_VERIFY(peer->bytesAvailable()>=12); peer->readAll();
+            peer->write(QByteArray::fromHex("0110")+QByteArray(24,0));
+            QTRY_VERIFY(peer->bytesAvailable()>=49);
+            QCOMPARE(peer->readAll().mid(1),credentials("token"+QString::number(login),"pass"));
+            QByteArray init(36,0);put16(init,0,2);put16(init,2,2);
+            peer->write(QByteArray(4,0)+init); QTRY_VERIFY(s.connected());
+        };
+        s.open(options); QTRY_VERIFY(console.hasPendingConnections());
+        auto *peer=console.nextPendingConnection(); handshake(peer,1);
+        peer->abort(); QTRY_VERIFY(s.status().contains("reconnect 1/6"));
+        QTRY_VERIFY_WITH_TIMEOUT(console.hasPendingConnections(),5000);
+        peer=console.nextPendingConnection(); handshake(peer,2); QCOMPARE(web.logins,2);
+        peer->abort(); QTRY_VERIFY(s.status().contains("reconnect 2/6"));
+        s.close(); QTest::qWait(4200); QCOMPARE(web.logins,2); QCOMPARE(s.status(),QString("Disconnected"));
+        // A new session that loses its transport must stop if web authentication is rejected.
+        s.open(options); QTRY_VERIFY(console.hasPendingConnections());
+        peer=console.nextPendingConnection(); handshake(peer,3); web.reject=true; peer->abort();
+        QTRY_VERIFY_WITH_TIMEOUT(!s.busy(),5000); QVERIFY(s.status().contains("check credentials"));
+        const int attempts=web.logins; QTest::qWait(2200); QCOMPARE(web.logins,attempts);
     }
     void cancelConnection() {
         QTcpServer server;QVERIFY(server.listen(QHostAddress::LocalHost));

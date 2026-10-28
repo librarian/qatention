@@ -33,13 +33,16 @@ signals:
     void frameReady(const QImage &image);
     void clearFrame();
 private:
-    enum class Phase { Idle, Web, Connecting, Banner, Security, Challenge, Auth, Init, Messages };
+    enum class Phase { Idle, Reconnecting, Web, Connecting, Banner, Security, Challenge, Auth, Init, Messages };
     Phase phase=Phase::Idle;
     QString statusText="Disconnected";
     QPointer<QSslSocket> socket;
     QPointer<QNetworkReply> reply;
     QNetworkAccessManager web;
-    QTimer deadline, heartbeat, nextFrame;
+    QTimer deadline, heartbeat, nextFrame, retry;
+    QVariantMap reconnectOptions;
+    bool established=false;
+    int retryCount=0;
     QElapsedTimer received, fullFrame;
     QByteArray buffer;
     Launch launch;
@@ -52,7 +55,9 @@ private:
     QPoint lastPointer;
     int buttons=0, frameInterval=100;
     void setStatus(const QString &text);
-    void fail(const QString &text);
+    void fail(const QString &text, bool transient=false);
+    void resetTransport();
+    void startAttempt(const QVariantMap &options);
     void connectKvm();
     void process();
     bool consumeMessage();
