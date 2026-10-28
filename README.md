@@ -57,6 +57,15 @@ No signing credentials are required for these development builds.
 Linux still needs system graphics/input libraries (including libxkbcommon, X11/XCB,
 OpenGL/EGL, and fontconfig); the archive bundles Qt, not an entire Linux userspace.
 
+### Enable the GitHub build matrix
+
+The initial publishing credential cannot create GitHub workflow files. The complete
+workflow is saved at [`docs/ci/build.yml`](docs/ci/build.yml). Move it to
+`.github/workflows/build.yml` using GitHub's web editor (or push using a credential
+with workflow permission). Its push trigger builds and tests all four targets and
+uploads their packages. Until that step is completed, this repository has a CI
+template rather than an active workflow.
+
 ## Connect
 
 Enter the BMC host and web credentials; HTTPS is the default. Credentials and
