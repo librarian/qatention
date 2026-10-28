@@ -21,5 +21,6 @@ Verified locally:
 Not yet verified: a live BMC, sustained video performance, physical keyboard/mouse
 behavior, HTTPS web arming against hardware, full mutual-TLS negotiation, or
 Windows/macOS binaries in this initial local verification. The desktop build workflow
-now checks those builds; consult its run results for current platform status.
+now checks Linux and Windows; consult its run results for current platform status.
+macOS builds and verification are deferred.
 Synthetic decoder tests do not establish correctness for all ASPEED bitstreams.

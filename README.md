@@ -1,8 +1,8 @@
 # QATENtion
 
 An early C++17 / Qt 6 Quick port of [ATENtion](https://github.com/librarian/ATENtion),
-a Supermicro ATEN/Pilot and ASPEED KVM console client. Desktop targets: Windows x64,
-Linux x64, and macOS Intel/Apple Silicon. Android is outside this first milestone.
+a Supermicro ATEN/Pilot and ASPEED KVM console client. Current build targets:
+Windows x64 and Linux x64. macOS builds are deferred; Android is outside this first milestone.
 
 ## Preview scope
 
@@ -51,8 +51,7 @@ that TLS and the bundled client certificate can be loaded; it makes no network
 connections. CI runs it both before and after packaging.
 
 CI uploads install-tree archives with the Qt runtime and QML imports. Linux
-packages target the CI distribution's ABI, not every Linux release. macOS archives
-are architecture-specific and unsigned/unnotarized. Windows packages are unsigned.
+packages target the CI distribution's ABI, not every Linux release. Windows packages are unsigned.
 No signing credentials are required for these development builds.
 Linux still needs system graphics/input libraries (including libxkbcommon, X11/XCB,
 OpenGL/EGL, and fontconfig); the archive bundles Qt, not an entire Linux userspace.
@@ -60,8 +59,8 @@ OpenGL/EGL, and fontconfig); the archive bundles Qt, not an entire Linux userspa
 ### GitHub build matrix
 
 [Desktop builds](https://github.com/librarian/qatention/actions/workflows/build.yml)
-runs on pushes and pull requests. It builds and tests Linux x64, Windows x64,
-macOS Intel, and macOS Apple Silicon, then uploads their install-tree archives.
+runs on pushes and pull requests. It builds and tests Linux x64 and Windows x64
+on native runners, then uploads their install-tree archives. macOS jobs are disabled.
 The workflow is also runnable manually from GitHub Actions.
 
 ## Connect

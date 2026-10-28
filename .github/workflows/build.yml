@@ -7,6 +7,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   desktop:
     strategy:
@@ -19,12 +23,6 @@ jobs:
           - os: windows-2022
             arch: win64_msvc2022_64
             label: windows-x64
-          - os: macos-15-intel
-            arch: clang_64
-            label: macos-x64
-          - os: macos-15
-            arch: clang_64
-            label: macos-arm64
     runs-on: ${{ matrix.os }}
     env:
       QT_QPA_PLATFORM: offscreen
@@ -48,11 +46,6 @@ jobs:
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             args+=(-DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl)
           fi
-          if [[ "${{ matrix.label }}" == "macos-arm64" ]]; then
-            args+=(-DCMAKE_OSX_ARCHITECTURES=arm64)
-          elif [[ "$RUNNER_OS" == "macOS" ]]; then
-            args+=(-DCMAKE_OSX_ARCHITECTURES=x86_64)
-          fi
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release "${args[@]}"
       - name: Build
         run: cmake --build build --parallel 3
@@ -70,9 +63,7 @@ jobs:
       - name: Test installed application
         shell: bash
         run: |
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
-            dist/qatention.app/Contents/MacOS/qatention --smoke-test
-          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
             dist/bin/qatention.exe --smoke-test
           else
             dist/bin/qatention --smoke-test
