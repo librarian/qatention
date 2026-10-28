@@ -43,6 +43,14 @@ jobs:
           bash scripts/setup_macos_cross.sh "$PWD/osxcross" "$RUNNER_TEMP/macos-build"
           python -m pip install aqtinstall==3.3.0
           python -m aqt install-qt mac desktop 6.8.3 clang_64 -O qt-macos --archives qtbase qtsvg
+      - name: Save prepared SDK cache
+        if: steps.mac-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            osxcross
+            qt-macos
+          key: ubuntu24-osxcross27d21e4-sdk14.5-qt6.8.3-rcodesign0.29-v1
       - name: Configure
         run: |
           export PATH="$PWD/osxcross/bin:$PATH"
@@ -50,6 +58,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
             "-DCMAKE_PREFIX_PATH=$PWD/qt-macos/6.8.3/macos" \
+            "-DCMAKE_FIND_ROOT_PATH=$PWD/qt-macos/6.8.3/macos" \
             "-DQT_HOST_PATH=$QT_ROOT_DIR"
       - name: Build and install
         run: |
