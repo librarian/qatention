@@ -133,7 +133,7 @@ ApplicationWindow {
                     leftPadding: 0; rightPadding: 0; topInset: 0; bottomInset: 0
                     font.pixelSize: keyboard.keyLayer === "main" ? Math.max(8, Math.min(12, keyboard.unit * 0.46)) : 14
                     text: keyboard.shifted && modelData.upper ? modelData.upper :
-                          ({"Backspace":"⌫", "Enter":"↵", "Shift":"⇧", "Caps":"⇪", "Tab":"⇥", "Win":"⊞", "Menu":"☰"}[modelData.label] || modelData.label)
+                          (modelData.label === "Backspace" ? "Bksp" : modelData.label)
                     highlighted: modelData.usage >= 224 && (mobile.modifiers & (1 << (modelData.usage - 224))) !== 0
                     onClicked: {
                         if (modelData.usage >= 224) mobile.toggleModifier(modelData.usage)
