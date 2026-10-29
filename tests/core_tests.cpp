@@ -42,7 +42,7 @@ static QByteArray frameMessage(const QByteArray& p, int w, int h)
 class WebBmc: public QTcpServer
 {
 public:
-    int logins = 0, logouts = 0;
+    int logins = 0, logouts = 0, mediaRequests = 0;
     bool reject = false;
     quint16 consolePort = 0;
     QSslKey key;
@@ -67,6 +67,11 @@ public:
             [this, socket, data]
             {
                 *data += socket->readAll();
+                if (*data == mediaControl(8)) {
+                    ++mediaRequests;
+                    data->clear();
+                    return;
+                }
                 if (!data->contains("\r\n\r\n")) {
                     return;
                 }
@@ -191,6 +196,43 @@ private slots:
         QCOMPARE(
             reloaded.entries().first().toMap().value("consoleTrust").toMap(),
             pin);
+    }
+
+    void mediaCertificatePinning()
+    {
+        Session resources;
+        auto load = [](const char* name)
+        {
+            QFile file(QString(":/tls/tests/certificates/") + name);
+            file.open(QIODevice::ReadOnly);
+            return file.readAll();
+        };
+        WebBmc bmc;
+        bmc.cert = QSslCertificate(load("leaf.pem"));
+        bmc.key = QSslKey(load("leaf.key"), QSsl::Rsa);
+        QVERIFY(bmc.listen(QHostAddress::LocalHost));
+        Launch endpoint;
+        endpoint.host = "127.0.0.1";   // Deliberate hostname mismatch.
+        endpoint.mediaPort = bmc.serverPort();
+        endpoint.tls = true;
+        Media media;
+        media.probe(endpoint, false);
+        QTRY_VERIFY(!media.busy());
+        QCOMPARE(bmc.mediaRequests, 0);
+        media.probe(endpoint, false, bmc.cert);
+        QTRY_COMPARE(bmc.mediaRequests, 1);
+        QVERIFY(media.busy());
+        media.unmount();
+        // An explicit pin wins over the broad compatibility option.
+        media.probe(endpoint, true, QSslCertificate(load("root.pem")));
+        QTRY_VERIFY(!media.busy());
+        QVERIFY(media.status().contains("differs"));
+        QCOMPARE(bmc.mediaRequests, 1);
+        endpoint.tls = false;
+        media.probe(endpoint, true, bmc.cert);
+        QTRY_VERIFY(!media.busy());
+        QVERIFY(media.status().contains("differs"));
+        QCOMPARE(bmc.mediaRequests, 1);
     }
 
     void httpsMissingIntermediate()

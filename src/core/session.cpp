@@ -511,6 +511,18 @@ void Session::handleWeb(const QByteArray& body, int step)
     }
 }
 
+QSslCertificate Session::mediaTrustedCertificate() const
+{
+    // Only transfer explicit trust from the authenticated console on this host.
+    if (!connected() || !socket || !socket->isEncrypted() ||
+        consoleTrust.isEmpty() ||
+        mediaLaunch.host.compare(launch.host, Qt::CaseInsensitive) != 0)
+    {
+        return QSslCertificate();
+    }
+    return socket->peerCertificate();
+}
+
 void Session::connectKvm()
 {
     mediaLaunch = launch;

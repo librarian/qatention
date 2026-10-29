@@ -319,7 +319,11 @@ void Media::stop(const QString& reason)
     emit changed();
 }
 
-void Media::mount(const Launch& endpoint, bool allow, const QString& path)
+void Media::mount(
+    const Launch& endpoint,
+    bool allow,
+    const QString& path,
+    const QSslCertificate& certificate)
 {
     if (busy()) {
         return;
@@ -329,6 +333,7 @@ void Media::mount(const Launch& endpoint, bool allow, const QString& path)
         cd = std::make_unique<CdRom>(path);
         mediaAttach(endpoint.user, endpoint.password, 0);
         launch = endpoint;
+        trustedCertificate = certificate;
         trust = allow;
         isoPath = path;
         phase = Health;
@@ -340,7 +345,10 @@ void Media::mount(const Launch& endpoint, bool allow, const QString& path)
     }
 }
 
-void Media::probe(const Launch& endpoint, bool allow)
+void Media::probe(
+    const Launch& endpoint,
+    bool allow,
+    const QSslCertificate& certificate)
 {
     if (busy()) {
         return;
@@ -348,6 +356,7 @@ void Media::probe(const Launch& endpoint, bool allow)
     try {
         probeOnly = true;
         launch = endpoint;
+        trustedCertificate = certificate;
         trust = allow;
         phase = Health;
         message = "Checking media slots…";
@@ -368,6 +377,13 @@ void Media::unmount()
     } else {
         stop("Media unmounted");
     }
+}
+
+bool Media::certificateMatches() const
+{
+    return channel && !trustedCertificate.isNull() &&
+           channel->peerCertificate().digest(QCryptographicHash::Sha256) ==
+               trustedCertificate.digest(QCryptographicHash::Sha256);
 }
 
 void Media::openChannel()
@@ -410,9 +426,38 @@ void Media::openChannel()
             for (const auto& e: errors) {
                 emit diagnostic("Virtual media TLS: " + e.errorString());
             }
-            if (trust && channel) {
-                channel->ignoreSslErrors();
+            if (!channel) {
+                return;
             }
+            if (trustedCertificate.isNull()) {
+                if (trust) {
+                    channel->ignoreSslErrors();
+                }
+                return;
+            }
+            if (!certificateMatches()) {
+                stop(
+                    "Virtual media certificate differs from the trusted "
+                    "console certificate");
+                return;
+            }
+            for (const auto& error: errors) {
+                switch (error.error()) {
+                    case QSslError::HostNameMismatch:
+                    case QSslError::SelfSignedCertificate:
+                    case QSslError::SelfSignedCertificateInChain:
+                    case QSslError::UnableToGetIssuerCertificate:
+                    case QSslError::UnableToGetLocalIssuerCertificate:
+                    case QSslError::UnableToVerifyFirstCertificate:
+                        break;
+                    default:
+                        return;
+                }
+            }
+            emit diagnostic(
+                "Virtual media TLS: trusted console certificate fingerprint "
+                "matched");
+            channel->ignoreSslErrors(errors);
         });
     connect(
         channel,
@@ -430,6 +475,14 @@ void Media::openChannel()
 void Media::ready()
 {
     try {
+        if (!trustedCertificate.isNull() &&
+            (!channel->isEncrypted() || !certificateMatches()))
+        {
+            stop(
+                "Virtual media certificate differs from the trusted console "
+                "certificate");
+            return;
+        }
         channel->setSocketOption(QAbstractSocket::LowDelayOption, 1);
         if (phase == Health || phase == PostHealth) {
             send(mediaControl(8));

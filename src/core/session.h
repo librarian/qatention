@@ -53,6 +53,8 @@ public:
         return mediaLaunch;
     }
 
+    QSslCertificate mediaTrustedCertificate() const;
+
     bool untrustedAllowed() const
     {
         return allowUntrusted;

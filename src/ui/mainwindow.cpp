@@ -888,7 +888,8 @@ void MainWindow::makeMenus()
             {
                 t->media->probe(
                     t->session->mediaEndpoint(),
-                    t->session->untrustedAllowed());
+                    t->session->untrustedAllowed(),
+                    t->session->mediaTrustedCertificate());
             }
         });
     connect(
@@ -1235,7 +1236,8 @@ void MainWindow::mountIso(const QString& path)
     t->media->mount(
         t->session->mediaEndpoint(),
         t->session->untrustedAllowed(),
-        path);
+        path,
+        t->session->mediaTrustedCertificate());
 }
 
 void MainWindow::saveSettings()

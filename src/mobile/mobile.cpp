@@ -177,7 +177,11 @@ void Mobile::mountIso(const QUrl& url)
         return;
     }
     file.close();
-    media.mount(session.mediaEndpoint(), session.untrustedAllowed(), path);
+    media.mount(
+        session.mediaEndpoint(),
+        session.untrustedAllowed(),
+        path,
+        session.mediaTrustedCertificate());
 }
 
 void Mobile::unmountIso()

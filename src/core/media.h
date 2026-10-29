@@ -41,10 +41,16 @@ class Media: public QObject
 public:
     explicit Media(QObject* parent = nullptr);
     ~Media() override;
-    void
-    mount(const Launch& endpoint, bool allowUntrusted, const QString& path);
+    void mount(
+        const Launch& endpoint,
+        bool allowUntrusted,
+        const QString& path,
+        const QSslCertificate& trustedCertificate = QSslCertificate());
     void unmount();
-    void probe(const Launch& endpoint, bool allowUntrusted);
+    void probe(
+        const Launch& endpoint,
+        bool allowUntrusted,
+        const QSslCertificate& trustedCertificate = QSslCertificate());
 
     bool busy() const
     {
@@ -79,6 +85,8 @@ private:
     } phase = Idle;
 
     Launch launch;
+    QSslCertificate trustedCertificate;
+    bool certificateMatches() const;
     bool trust = false, probeOnly = false;
     QString message = "No media mounted", isoPath;
     QPointer<QSslSocket> channel, data;

@@ -112,8 +112,12 @@ succeeds or the broad compatibility checkbox is enabled; changed certificates,
 changed endpoints, and plaintext downgrades are rejected. A pin permits the
 expected self-signed/hostname trust errors, not expiry or invalid signatures.
 Use **Forget trusted console certificate** in the profile editor and Connect to
-explicitly clear an old pin before reviewing a replacement. HTTPS and virtual
-media certificate policies are unaffected. The command-line client does not
+explicitly clear an old pin before reviewing a replacement. Virtual media reuses
+the authenticated console's explicitly trusted certificate on the same BMC host,
+including its separate media ports. Each media TLS connection must present that
+exact certificate; a different certificate or plaintext downgrade is rejected,
+even with the compatibility checkbox enabled. Expiry and invalid signatures remain
+errors. HTTPS trust is unaffected. The command-line client does not
 interactively grant trust.
 
 Web login acquires fresh console tokens. Java-interface switching is opt-in.
