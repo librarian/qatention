@@ -43,7 +43,7 @@ with tempfile.TemporaryDirectory(prefix='qatention-wine-') as work:
     test_runtime = bin_dir / 'Qt6Test.dll'
     shutil.copy2(qt / 'bin/Qt6Test.dll', test_runtime)
     try:
-        for name in ('core_tests', 'ui_tests'):
+        for name in ('core_tests', 'ui_tests', 'certificatechain_tests'):
             tests = bin_dir / (name + '.exe')
             shutil.copy2(build / tests.name, tests)
             try:

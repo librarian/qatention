@@ -63,6 +63,7 @@ private:
     QString statusText="Disconnected", tlsFailure;
     QPointer<QSslSocket> socket;
     QPointer<QNetworkReply> reply;
+    QPointer<QObject> issuerFetch;
     QNetworkAccessManager web;
     QTimer deadline, heartbeat, nextFrame, retry;
     QVariantMap reconnectOptions;
@@ -96,7 +97,7 @@ private:
     bool consumeMessage();
     void send(const QByteArray &bytes);
     void requestFrame();
-    void requestWeb(const QString &path,const QByteArray &body,int step,const QByteArray &csrf={});
+    void requestWeb(const QString &path,const QByteArray &body,int step,const QByteArray &csrf={},bool chainRetried=false);
     void handleWeb(const QByteArray &body,int step);
 };
 }

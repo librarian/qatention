@@ -13,6 +13,7 @@
 #include <QTemporaryDir>
 #include <QFile>
 #include <QSslKey>
+#include <QSslConfiguration>
 
 using namespace aten;
 static QByteArray hermon(int w,int h,quint16 pixel) {
@@ -58,6 +59,35 @@ public:
 class CoreTests : public QObject {
     Q_OBJECT
 private slots:
+    void httpsMissingIntermediate() {
+        auto load=[](const char *name){QFile f(QString(":/tls/tests/certificates/")+name);f.open(QIODevice::ReadOnly);return f.readAll();};
+        const auto original=QSslConfiguration::defaultConfiguration();
+        struct Restore { QSslConfiguration config; ~Restore(){QSslConfiguration::setDefaultConfiguration(config);} } restore{original};
+        auto config=original;config.setCaCertificates({QSslCertificate(load("root.pem"))});
+        QSslConfiguration::setDefaultConfiguration(config);
+        WebBmc bmc;bmc.cert=QSslCertificate(load("leaf.pem"));bmc.key=QSslKey(load("leaf.key"),QSsl::Rsa);
+        QVERIFY(bmc.listen(QHostAddress::LocalHost));
+        QTcpServer aia;QVERIFY(aia.listen(QHostAddress::LocalHost,18081));
+        int downloads=0;const auto der=QSslCertificate(load("issuer.pem")).toDer();
+        connect(&aia,&QTcpServer::newConnection,this,[&]{
+            auto *s=aia.nextPendingConnection();
+            connect(s,&QTcpSocket::readyRead,s,[&,s]{
+                s->readAll();++downloads;
+                s->write("HTTP/1.1 200 OK\r\nContent-Length: "+QByteArray::number(der.size())+"\r\nConnection: close\r\n\r\n"+der);
+                s->disconnectFromHost();
+            });
+            connect(s,&QTcpSocket::disconnected,s,&QObject::deleteLater);
+        });
+        QVariantMap options{{"host","localhost"},{"webPort",bmc.serverPort()},{"user","admin"},{"password","password"},{"allowUntrusted",false},{"autoReconnect",false}};
+        Session session;session.open(options);
+        QTRY_COMPARE(bmc.logins,1);QCOMPARE(downloads,1);
+        QTRY_COMPARE(bmc.logouts,1);session.close();
+        // Cached intermediates must never act as trusted roots.
+        config.setCaCertificates({});QSslConfiguration::setDefaultConfiguration(config);
+        Session untrusted;untrusted.open(options);QTRY_VERIFY(!untrusted.busy());
+        QCOMPARE(bmc.logins,1);
+        QVERIFY(untrusted.status().contains("certificate validation failed"));
+    }
     void videoTraceReplay() {
         QTemporaryDir dir;VideoTrace trace;const auto path=dir.filePath("video.jsonl");
         QVERIFY(trace.start(path));Decoder decoder;decoder.resize({8,8});

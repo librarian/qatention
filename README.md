@@ -93,6 +93,17 @@ different certificates: a valid web certificate does not imply the KVM certifica
 is valid. The bundled vendor client identity authenticates the client, not the
 server. Put an unencrypted client.pfx beside the executable to override it.
 
+With verification enabled, HTTPS login can recover a missing intermediate chain
+using the certificate's AIA `caIssuers` URLs (HTTP or HTTPS). Downloads use a separate
+client without BMC cookies or credentials, reject redirects, and are bounded to
+64 KiB per response, six downloads, and 15 seconds total. DER certificates and PEM
+chains are supported. The completed chain must validate against existing trusted
+roots and the hostname; only missing-issuer handshake errors can be recovered.
+Validated intermediates are cached in memory for up to 32 leaf certificates and
+revalidated on reuse. They are never installed as trusted roots or imported into
+Keychain. Debug logging reports retrieval and validation. This does not accept
+self-signed console/media certificates or change the unverified setting.
+
 Web login acquires fresh console tokens. Java-interface switching is opt-in.
 Automatic reconnect allows 30 attempts: five seconds between the first five,
 then thirty seconds. Receiving a console message resets the budget. Authentication

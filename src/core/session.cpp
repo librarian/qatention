@@ -1,5 +1,6 @@
 #include "session.h"
 #include "media.h"
+#include "certificatechain.h"
 #include <QCoreApplication>
 #include <QNetworkReply>
 #include <QNetworkCookieJar>
@@ -58,6 +59,7 @@ void Session::resetTransport() {
     QScopedValueRollback guard(closing,true);
     releaseInput();
     ++generation;
+    delete issuerFetch; issuerFetch=nullptr;
     deadline.stop(); heartbeat.stop(); nextFrame.stop();
     if(reply) { reply->disconnect(this); reply->abort(); reply->deleteLater(); reply=nullptr; }
     if(socket) { socket->disconnect(this); socket->abort(); socket->deleteLater(); socket=nullptr; }
@@ -70,7 +72,11 @@ void Session::resetTransport() {
             auto *jar=new QNetworkCookieJar(manager);jar->setCookiesFromUrl(cookies,url);manager->setCookieJar(jar);
             QNetworkRequest request(url.resolved(QUrl("/cgi/logout.cgi")));request.setTransferTimeout(3000);
             auto *r=manager->get(request);
-            QObject::connect(r,&QNetworkReply::sslErrors,manager,[r,trust](const QList<QSslError>&){if(trust) r->ignoreSslErrors();});
+            QObject::connect(r,&QNetworkReply::sslErrors,manager,[r,trust](const QList<QSslError>& errors){
+                if(trust || (CertificateChain::missingIssuerOnly(errors) &&
+                    CertificateChain::verify(CertificateChain::cached(r->sslConfiguration().peerCertificateChain()),r->url().host())))
+                    r->ignoreSslErrors(errors);
+            });
             QObject::connect(r,&QNetworkReply::finished,manager,&QObject::deleteLater);
         };
         if(keepMedia) deferredLogouts.append(logout);else logout();
@@ -130,7 +136,7 @@ void Session::startAttempt(const QVariantMap &o) {
         }
     } catch(const std::exception &e) { fail(QString::fromUtf8(e.what())); }
 }
-void Session::requestWeb(const QString &path,const QByteArray &body,int step,const QByteArray &csrf) {
+void Session::requestWeb(const QString &path,const QByteArray &body,int step,const QByteArray &csrf,bool chainRetried) {
     tlsFailure.clear();
     emit diagnostic(QString("HTTPS request step %1 to %2:%3: %4").arg(step).arg(baseUrl.host()).arg(baseUrl.port()).arg(path));
     QNetworkRequest request(baseUrl.resolved(QUrl(path)));
@@ -143,13 +149,36 @@ void Session::requestWeb(const QString &path,const QByteArray &body,int step,con
     if(!body.isEmpty()) request.setHeader(QNetworkRequest::ContentTypeHeader,"application/x-www-form-urlencoded");
     auto *r=body.isEmpty()? web.get(request) : web.post(request,body);
     reply=r; const auto epoch=generation;
-    connect(r,&QNetworkReply::sslErrors,this,[this,r](const QList<QSslError> &errors){ reportTlsErrors("HTTPS",errors); if(allowUntrusted) r->ignoreSslErrors(); });
+    auto missingChain=std::make_shared<QList<QSslCertificate>>();
+    connect(r,&QNetworkReply::sslErrors,this,[this,r,missingChain](const QList<QSslError> &errors){
+        reportTlsErrors("HTTPS",errors);
+        if(allowUntrusted) { r->ignoreSslErrors(); return; }
+        if(!CertificateChain::missingIssuerOnly(errors)) return;
+        const auto peer=r->sslConfiguration().peerCertificateChain();
+        if(CertificateChain::verify(CertificateChain::cached(peer),r->url().host())) {
+            emit diagnostic("HTTPS: peer chain verified using cached intermediates");
+            r->ignoreSslErrors(errors);
+        } else *missingChain=peer;
+    });
     connect(r,&QNetworkReply::readyRead,this,[this,r]{
         if(r->bytesAvailable()>1024*1024) fail("BMC web response is too large");
     });
-    connect(r,&QNetworkReply::finished,this,[this,r,step,epoch]{
+    connect(r,&QNetworkReply::finished,this,[this,r,step,epoch,path,body,csrf,chainRetried,missingChain]{
         if(epoch!=generation) { r->deleteLater(); return; }
         reply=nullptr; r->deleteLater();
+        if(r->error()==QNetworkReply::SslHandshakeFailedError && !chainRetried && !missingChain->isEmpty()) {
+            // The TLS handshake failed before any HTTP credentials were sent.
+            issuerFetch=new QObject(this);
+            CertificateChain::fetch(issuerFetch,*missingChain,r->url().host(),
+                [this,epoch](const QString &message){if(epoch==generation) emit diagnostic(message);},
+                [this,epoch,path,body,step,csrf](bool ok){
+                    if(epoch!=generation) return;
+                    issuerFetch->deleteLater();issuerFetch=nullptr;
+                    if(ok) requestWeb(path,body,step,csrf,true);
+                    else { const auto error=tlsFailure; fail(error); }
+                });
+            return;
+        }
         if(r->error()!=QNetworkReply::NoError) { fail(tlsFailure.isEmpty()?"BMC web request failed: "+r->errorString():tlsFailure, r->error()==QNetworkReply::ConnectionRefusedError || r->error()==QNetworkReply::RemoteHostClosedError || r->error()==QNetworkReply::HostNotFoundError || r->error()==QNetworkReply::TimeoutError || r->error()==QNetworkReply::TemporaryNetworkFailureError); return; }
         tlsFailure.clear();
         auto b=r->readAll();

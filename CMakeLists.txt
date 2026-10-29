@@ -15,6 +15,7 @@ add_library(qatention_core STATIC
     src/core/protocol.cpp src/core/protocol.h
     src/core/session.cpp src/core/session.h
     src/core/profiles.cpp src/core/profiles.h
+    src/core/certificatechain.cpp src/core/certificatechain.h
     src/core/debuglog.cpp src/core/debuglog.h
     src/core/media.cpp src/core/media.h
     src/core/videotrace.cpp src/core/videotrace.h)
@@ -60,14 +61,23 @@ install(DIRECTORY third_party/aspeed DESTINATION ${CMAKE_INSTALL_DATADIR}/qatent
 
 include(CTest)
 if(BUILD_TESTING)
+    qt_add_executable(certificatechain_tests tests/certificatechain_tests.cpp src/core/certificatechain.cpp)
+    target_include_directories(certificatechain_tests PRIVATE src)
+    target_link_libraries(certificatechain_tests PRIVATE Qt6::Network Qt6::Test)
+    qt_add_resources(certificatechain_tests test_certificates PREFIX /tls FILES
+        tests/certificates/root.pem tests/certificates/issuer.pem tests/certificates/leaf.pem tests/certificates/leaf.key)
+    add_test(NAME certificatechain COMMAND certificatechain_tests)
+    set_tests_properties(certificatechain PROPERTIES TIMEOUT 30 RESOURCE_LOCK aia_test_port)
     qt_add_executable(ui_tests tests/ui_tests.cpp src/ui/mainwindow.cpp src/ui/mainwindow.h src/ui/console.cpp src/ui/console.h)
     target_link_libraries(ui_tests PRIVATE qatention_core Qt6::Widgets Qt6::Test)
     add_test(NAME ui COMMAND ui_tests)
     set_tests_properties(ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 20)
     qt_add_executable(core_tests tests/core_tests.cpp)
     target_link_libraries(core_tests PRIVATE qatention_core Qt6::Test)
+    qt_add_resources(core_tests core_test_certificates PREFIX /tls FILES
+        tests/certificates/root.pem tests/certificates/issuer.pem tests/certificates/leaf.pem tests/certificates/leaf.key)
     add_test(NAME core COMMAND core_tests)
-    set_tests_properties(core PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
+    set_tests_properties(core PROPERTIES RESOURCE_LOCK aia_test_port ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
     add_test(NAME decoder_cli COMMAND qatention-capture --check-native-decoder)
     add_test(NAME app_smoke COMMAND qatention --smoke-test)
     set_tests_properties(app_smoke PROPERTIES
