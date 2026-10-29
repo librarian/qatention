@@ -31,7 +31,7 @@ archives include Qt's LGPL/GPL license texts. Exact Qt source releases are at
 https://download.qt.io/archive/qt/6.8/6.8.3/single/ . Do not treat the application's
 MIT license as replacing Qt's or ASPEED's license.
 
-Windows cross-build packages include OpenSSL 3.5.9 (Apache-2.0), built from the
+Windows and macOS cross-build packages include OpenSSL 3.5.9 (Apache-2.0), built from the
 checksum-verified upstream source using MinGW. Its license is included under
 `licenses/OpenSSL.txt`. Source: https://github.com/openssl/openssl/tree/openssl-3.5.9 .
 MinGW GCC runtime libraries use the GCC Runtime Library Exception; their copyright

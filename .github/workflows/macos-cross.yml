@@ -51,6 +51,17 @@ jobs:
             osxcross
             qt-macos
           key: ubuntu24-osxcross27d21e4-sdk14.5-qt6.8.3-rcodesign0.29-v1
+      - name: Cache macOS OpenSSL
+        uses: actions/cache@v5
+        id: openssl-cache
+        with:
+          path: openssl-macos
+          key: macos-sdk14.5-openssl3.5.9-${{ matrix.arch }}-v1
+      - name: Cross-build OpenSSL
+        if: steps.openssl-cache.outputs.cache-hit != 'true'
+        run: |
+          export PATH="$PWD/osxcross/bin:$PATH"
+          bash scripts/build_macos_openssl.sh "$PWD/openssl-macos" "$RUNNER_TEMP/openssl-build" '${{ matrix.arch }}'
       - name: Configure
         run: |
           export PATH="$PWD/osxcross/bin:$PATH"
@@ -70,7 +81,7 @@ jobs:
       - name: Bundle, sign and verify dependencies
         run: |
           export PATH="$PWD/osxcross/bin:$PATH"
-          python scripts/package_macos.py --qt qt-macos/6.8.3/macos --dest dist --tools osxcross/bin --arch ${{ matrix.arch }}
+          python scripts/package_macos.py --qt qt-macos/6.8.3/macos --openssl openssl-macos --dest dist --tools osxcross/bin --arch ${{ matrix.arch }}
       - name: Include Qt licenses
         run: |
           mkdir -p dist/licenses/qt

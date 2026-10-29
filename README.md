@@ -166,6 +166,11 @@ CI checks architectures, bundled library dependencies, signature code-page hashe
 it cannot run the macOS application. Login, TLS, video, input and media need testing
 on a Mac. macOS currently stores profile credentials in owner-readable JSON.
 
+Mac packages use Qt's OpenSSL TLS backend with bundled OpenSSL 3.5.9. The vendor
+client identity stays in process memory during authentication; SecureTransport is
+excluded so it cannot import the private key into the login Keychain or prompt
+for access. Existing Keychain entries from older builds are not modified.
+
 ### Investigating incremental video
 
 Choose **Logging → Record video trace for 60 seconds…** and select a folder.

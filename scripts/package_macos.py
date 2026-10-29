@@ -11,6 +11,7 @@ from verify_macos_signature import verify
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--qt', required=True, type=Path)
+parser.add_argument('--openssl', required=True, type=Path)
 parser.add_argument('--dest', required=True, type=Path)
 parser.add_argument('--tools', required=True, type=Path)
 parser.add_argument('--arch', choices=('arm64', 'x86_64'), required=True)
@@ -29,6 +30,13 @@ otool = tools / (args.arch + '-apple-darwin23.5-otool')
 lipo = tools / (args.arch + '-apple-darwin23.5-lipo')
 signer = tools / 'rcodesign'
 queue = list((contents / 'MacOS').iterdir())
+openssl_names = {'libcrypto.3.dylib', 'libssl.3.dylib'}
+for name in sorted(openssl_names):
+    target = frameworks / name
+    shutil.copy2(args.openssl / 'lib' / name, target)
+    queue.append(target)
+(dest / 'licenses').mkdir(exist_ok=True)
+shutil.copy2(args.openssl / 'licenses/OpenSSL.txt', dest / 'licenses/OpenSSL.txt')
 
 for category in ('platforms', 'styles', 'imageformats', 'iconengines', 'tls', 'networkinformation'):
     origin = qt / 'plugins' / category
@@ -37,7 +45,7 @@ for category in ('platforms', 'styles', 'imageformats', 'iconengines', 'tls', 'n
     for path in origin.glob('*.dylib'):
         if category == 'platforms' and path.name not in ('libqcocoa.dylib', 'libqoffscreen.dylib'):
             continue
-        if category == 'tls' and 'openssl' in path.name:
+        if category == 'tls' and path.name != 'libqopensslbackend.dylib':
             continue
         target = plugins / category / path.name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -67,6 +75,8 @@ while queue:
     for dependency in dependencies(binary):
         if dependency.startswith(('/System/Library/', '/usr/lib/')):
             continue
+        if dependency in {'@rpath/' + name for name in openssl_names}:
+            continue
         if dependency.startswith('@rpath/') and '.framework/' in dependency:
             name = dependency.split('/')[1]
             if name not in copied:
@@ -88,8 +98,10 @@ while queue:
 (contents / 'MacOS/qt.conf').unlink(missing_ok=True)
 if not (plugins / 'platforms/libqcocoa.dylib').is_file():
     raise RuntimeError('Cocoa platform plugin missing')
-if not (plugins / 'tls/libqsecuretransportbackend.dylib').is_file():
-    raise RuntimeError('macOS native TLS backend missing')
+if not (plugins / 'tls/libqopensslbackend.dylib').is_file():
+    raise RuntimeError('OpenSSL TLS backend missing')
+if (plugins / 'tls/libqsecuretransportbackend.dylib').exists():
+    raise RuntimeError('SecureTransport must not be bundled: it can import keys into Keychain')
 
 # Use an ad-hoc signature: no Developer ID credentials or notarization implied.
 subprocess.run([str(signer), 'sign', str(bundle)], check=True)
