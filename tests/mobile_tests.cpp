@@ -84,12 +84,13 @@ private slots:
             }
         }
         QCOMPARE(keys, 74);
-        QVERIFY(QMetaObject::invokeMethod(
-            viewport,
-            "zoomAt",
-            Q_ARG(QVariant, 2.0),
-            Q_ARG(QVariant, 196.5),
-            Q_ARG(QVariant, 100.0)));
+        QVERIFY(
+            QMetaObject::invokeMethod(
+                viewport,
+                "zoomAt",
+                Q_ARG(QVariant, 2.0),
+                Q_ARG(QVariant, 196.5),
+                Q_ARG(QVariant, 100.0)));
         QCOMPARE(viewport->property("zoom").toDouble(), 2.0);
         QTest::qWait(30);
         QVERIFY(video->width() > viewport->width());
@@ -252,9 +253,10 @@ private slots:
             qobject_cast<QQuickWindow*>(engine.rootObjects().first());
         QVERIFY(window);
         window->resize(393, 800);
-        QVERIFY(QMetaObject::invokeMethod(
-            window->findChild<QObject*>("connectDialog"),
-            "close"));
+        QVERIFY(
+            QMetaObject::invokeMethod(
+                window->findChild<QObject*>("connectDialog"),
+                "close"));
         auto* keyboard = window->findChild<QQuickItem*>("keyboard");
         auto* viewport = window->findChild<QQuickItem*>("consoleViewport");
         QVERIFY(keyboard && viewport);

@@ -318,7 +318,7 @@ build-mobile/qatention
 
 First-party C++ (`src/` and `tests/`) follows the
 [NBS clang-format style](https://github.com/ydb-platform/nbs/blob/main/.clang-format),
-with Qt macros and local include groups. Use **clang-format 18.1.8**; vendored
+with Qt macros and local include groups. Use **clang-format 23.1.3** and **clang-tidy 23.1.4**; vendored
 `third_party/` sources and generated files are excluded. Existing Qt-style names
 are retained. QML, JavaScript and Java are outside the C++ formatting check.
 
@@ -335,6 +335,8 @@ Repeat configure/build/tidy with `-DQATENTION_MOBILE=ON` in a separate build
 directory to cover the mobile interface. The Code quality workflow does both.
 The NBS-inspired clang-tidy policy checks analyzer findings, bug-prone code,
 performance, portability and selected modernization rules; findings fail CI.
+The pragma-once portability check is excluded because all supported compilers
+support the project's existing header convention.
 CodeQL runs security-extended analysis on C++, Python and Actions on pushes,
 pull requests and weekly. Native Windows/macOS/Android-only branches still need
 their platform builds and runtime tests; Linux analysis is not full platform

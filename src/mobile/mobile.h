@@ -119,7 +119,7 @@ private:
     void applyViewSettings();
     QMarginsF insets;
     QTimer insetTimer;
-    int modifierMask = 0;
+    quint32 modifierMask = 0;
     void releaseModifiers();
     QVariantMap options, pendingTrust;
     QString trustKey() const;
@@ -130,8 +130,9 @@ class MobileVideo: public QQuickPaintedItem
     Q_OBJECT
     Q_PROPERTY(QSize frameSize READ frameSize NOTIFY frameSizeChanged)
     Q_PROPERTY(qreal zoom READ zoom NOTIFY zoomChanged)
-    Q_PROPERTY(aten::Session* session READ session WRITE setSession NOTIFY
-                   sessionChanged)
+    Q_PROPERTY(
+        aten::Session* session READ session WRITE setSession NOTIFY
+            sessionChanged)
 public:
     explicit MobileVideo(QQuickItem* parent = nullptr)
         : QQuickPaintedItem(parent)

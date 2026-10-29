@@ -46,8 +46,9 @@ private slots:
         QVERIFY(!CertificateChain::verify(
             {leaf, issuer, cert("root.pem")},
             "localhost"));
-        QVERIFY(CertificateChain::missingIssuerOnly(
-            {QSslError(QSslError::UnableToVerifyFirstCertificate)}));
+        QVERIFY(
+            CertificateChain::missingIssuerOnly(
+                {QSslError(QSslError::UnableToVerifyFirstCertificate)}));
         QVERIFY(!CertificateChain::missingIssuerOnly(
             {QSslError(QSslError::UnableToVerifyFirstCertificate),
              QSslError(QSslError::HostNameMismatch)}));

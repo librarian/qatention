@@ -52,9 +52,10 @@ Session::Session(QObject* parent)
             if (!connected()) {
                 return;
             }
-            emit diagnostic(QString("Pipeline: requests=%1 full=%2 replies=%3 "
-                                    "decoded=%4 pending=%5 streaming=%6 "
-                                    "keys=%7 pointers=%8 rejectedInput=%9")
+            emit diagnostic(QString(
+                                "Pipeline: requests=%1 full=%2 replies=%3 "
+                                "decoded=%4 pending=%5 streaming=%6 "
+                                "keys=%7 pointers=%8 rejectedInput=%9")
                                 .arg(requests)
                                 .arg(fullRequests)
                                 .arg(updates)

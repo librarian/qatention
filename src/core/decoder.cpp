@@ -2,8 +2,6 @@
 
 #include "protocol.h"
 
-#include <QMutex>
-#include <QMutexLocker>
 #include <QtEndian>
 
 #include <cstring>
@@ -29,7 +27,7 @@ void aspeed_decode_ctx_map(
 }
 
 namespace aten {
-static QMutex nativeMutex;
+static std::mutex nativeMutex;
 static std::once_flag initialized;
 
 Decoder::Decoder()
@@ -39,7 +37,7 @@ Decoder::Decoder()
 
 Decoder::~Decoder()
 {
-    QMutexLocker lock(&nativeMutex);
+    std::lock_guard lock(nativeMutex);
     aspeed_ctx_free(context);
 }
 
@@ -50,7 +48,7 @@ void Decoder::resize(QSize size)
     {
         throw Error("Unsupported framebuffer dimensions");
     }
-    QMutexLocker lock(&nativeMutex);
+    std::lock_guard lock(nativeMutex);
     aspeed_ctx_free(context);
     context = nullptr;
     frame = QImage(size, QImage::Format_ARGB32);
@@ -62,8 +60,11 @@ void Decoder::resize(QSize size)
 
 static QRgb rgb555(const char* p)
 {
-    const auto v = quint16(quint8(p[0]) | (quint16(quint8(p[1])) << 8));
-    return qRgb(((v >> 10) & 31) << 3, ((v >> 5) & 31) << 3, (v & 31) << 3);
+    const auto v = quint32(quint8(p[0])) | (quint32(quint8(p[1])) << 8U);
+    return qRgb(
+        ((v >> 10U) & 31U) << 3U,
+        ((v >> 5U) & 31U) << 3U,
+        (v & 31U) << 3U);
 }
 
 bool Decoder::decode(const QByteArray& p, quint32 encoding)
@@ -88,7 +89,7 @@ bool Decoder::decode(const QByteArray& p, quint32 encoding)
             ((qsizetype(frame.width()) + block - 1) / block) *
                 ((frame.height() + block - 1) / block),
             0);
-        QMutexLocker lock(&nativeMutex);
+        std::lock_guard lock(nativeMutex);
         std::call_once(initialized, aspeed_init);
         if (!context) {
             context = aspeed_ctx_new();
@@ -162,7 +163,7 @@ static QByteArray expandRle(const QByteArray& input, int size)
         dest += count;
     };
     while (pos < input.size()) {
-        pos = (pos + 3) & ~qsizetype(3);
+        pos = ((pos + 3) / 4) * 4;
         if (pos == input.size()) {
             break;
         }
@@ -208,25 +209,24 @@ planePixel(const QByteArray& planes, int base, int pixels, int n, bool type4)
     const int stride = (pixels + 7) / 8;
     auto assemble = [&](int group)
     {
-        int v = 0;
+        quint32 v = 0;
         for (int k = 0; k < 8; ++k) {
-            v |= ((quint8(planes[base + (group + 7 - k) * stride + (n >> 3)]) >>
-                   (n & 7)) &
-                  1)
-                 << k;
+            const int index = base + (group + 7 - k) * stride + n / 8;
+            const quint32 packed = quint8(planes[index]);
+            v |= ((packed >> unsigned(n % 8)) & 1U) << unsigned(k);
         }
         return v;
     };
     if (type4) {
         return qRgb(assemble(24), assemble(0), assemble(8));
     }
-    const int low = assemble(8), high = assemble(0);
+    const auto low = assemble(8), high = assemble(0);
     // Type 2 uses the vendor's packed conversion, distinct from raw Hermon
     // RGB555.
     return qRgb(
-        high & 0xf8,
-        ((low >> 3 & 0x1c) | (high << 5)) & 255,
-        (low << 3) & 255);
+        high & 0xf8U,
+        ((low >> 3U & 0x1cU) | (high << 5U)) & 255U,
+        (low << 3U) & 255U);
 }
 
 bool Decoder::decodePlanes(const QByteArray& p)
@@ -251,8 +251,9 @@ bool Decoder::decodePlanes(const QByteArray& p)
                 throw Error("Truncated palette frame");
             }
             for (int n = 0; n < pixels; ++n) {
-                const auto v = quint8(payload[n / (nibble ? 2 : 1)]);
-                const int index = nibble ? ((v >> ((n % 2) * 4)) & 15) : v;
+                const auto v = quint32(quint8(payload[n / (nibble ? 2 : 1)]));
+                const int index =
+                    nibble ? ((v >> unsigned((n % 2) * 4)) & 15U) : v;
                 reinterpret_cast<QRgb*>(
                     frame.scanLine(n / frame.width()))[n % frame.width()] =
                     qRgb(

@@ -216,8 +216,9 @@ Console::Console(QWidget* parent)
                                             QCryptographicHash::Sha256)
                                             .toHex();
                 emit diagnostic(
-                    QString("View: received=%1 painted=%2 paints=%3 visible=%4 "
-                            "focused=%5 size=%6x%7 imageSha256=%8")
+                    QString(
+                        "View: received=%1 painted=%2 paints=%3 visible=%4 "
+                        "focused=%5 size=%6x%7 imageSha256=%8")
                         .arg(receivedFrames)
                         .arg(paintedFrame)
                         .arg(paintEvents)
@@ -379,14 +380,14 @@ void Console::keyPressEvent(QKeyEvent* e)
         const int vk = usage == 0x39   ? VK_CAPITAL
                        : usage == 0x47 ? VK_SCROLL
                                        : VK_NUMLOCK;
-        if (!(GetKeyState(vk) & 1)) {
+        if (!(quint16(GetKeyState(vk)) & 1U)) {
             usage |= 0xff00;
         }
     }
 #endif
     const auto id = e->nativeScanCode()
                         ? quint64(e->nativeScanCode())
-                        : (quint64(1) << 32) | quint32(e->key());
+                        : (quint64(1) << 32U) | quint32(e->key());
     if (e->isAutoRepeat()) {
         if (held.contains(id)) {
             connection->key(held.value(id), true);
@@ -406,7 +407,7 @@ void Console::keyReleaseEvent(QKeyEvent* e)
     if (connection && !e->isAutoRepeat()) {
         const auto id = e->nativeScanCode()
                             ? quint64(e->nativeScanCode())
-                            : (quint64(1) << 32) | quint32(e->key());
+                            : (quint64(1) << 32U) | quint32(e->key());
         auto it = held.find(id);
         if (it != held.end()) {
             connection->key(it.value(), false);
@@ -422,9 +423,9 @@ void Console::pointer(QPointF point, Qt::MouseButtons state, int wheel)
     if (!connection || rect.isEmpty()) {
         return;
     }
-    int mask = (state.testFlag(Qt::LeftButton) ? 1 : 0) |
-               (state.testFlag(Qt::MiddleButton) ? 2 : 0) |
-               (state.testFlag(Qt::RightButton) ? 4 : 0) | wheel;
+    int mask = (state.testFlag(Qt::LeftButton) ? 1U : 0U) |
+               (state.testFlag(Qt::MiddleButton) ? 2U : 0U) |
+               (state.testFlag(Qt::RightButton) ? 4U : 0U) | unsigned(wheel);
     int x = qBound(
         0,
         int((point.x() - rect.x()) * frame.width() / rect.width()),

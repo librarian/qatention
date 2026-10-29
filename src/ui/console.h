@@ -7,8 +7,9 @@
 class Console: public QWidget
 {
     Q_OBJECT
-    Q_PROPERTY(aten::Session* session READ session WRITE setSession NOTIFY
-                   sessionChanged)
+    Q_PROPERTY(
+        aten::Session* session READ session WRITE setSession NOTIFY
+            sessionChanged)
 public:
     explicit Console(QWidget* parent = nullptr);
 
@@ -20,7 +21,7 @@ public:
     void setSession(aten::Session* s);
     void paintEvent(QPaintEvent* event) override;
 
-    QSize frameSize() const
+    QSize remoteFrameSize() const
     {
         return frame.size();
     }

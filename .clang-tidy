@@ -3,20 +3,17 @@
 Checks: >-
   -*,
   clang-analyzer-*,
-  -clang-analyzer-cplusplus.NewDelete,
   bugprone-*,
   -bugprone-easily-swappable-parameters,
   -bugprone-narrowing-conversions,
   performance-*,
   -performance-enum-size,
   portability-*,
+  -portability-avoid-pragma-once,
   modernize-use-override,
   modernize-use-nullptr,
   readability-misleading-indentation
 WarningsAsErrors: '*'
 HeaderFilterRegex: '(^|/)(src|tests)/.*'
 FormatStyle: file
-# Clang 18 NewDelete reports a duplicate free inside Qt 6.8's
-# ExternalRefCountData::operator delete during QPointer assignment. Re-enable
-# after upgrading LLVM and checking media.cpp/session.cpp against Qt.
-# Other analyzer checks (including NewDeleteLeaks) remain enabled.
+# All supported compilers implement pragma once; retain the existing header style.

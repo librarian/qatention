@@ -39,7 +39,7 @@ static QString passwordPrompt()
     const bool terminal = tcgetattr(STDIN_FILENO, &old) == 0;
     if (terminal) {
         hidden = old;
-        hidden.c_lflag &= ~ECHO;
+        hidden.c_lflag &= ~tcflag_t(ECHO);
         tcsetattr(STDIN_FILENO, TCSAFLUSH, &hidden);
     }
 #endif
@@ -290,8 +290,8 @@ int main(int argc, char** argv)
             &app,
             [&](const QByteArray& packet, quint32 encoding)
             {
-                if (rawSaved || !parser.isSet("raw-output") || encoding != 0x57)
-                {
+                if (rawSaved || !parser.isSet("raw-output") ||
+                    encoding != 0x57) {
                     return;
                 }
                 QFile file(parser.value("raw-output"));

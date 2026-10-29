@@ -228,11 +228,12 @@ MainWindow::Tab* MainWindow::addTab(const QString& name)
             auto* box = new QMessageBox(
                 QMessageBox::Warning,
                 "Trust console certificate?",
-                QString("The console at %1:%2 could not be verified. Compare "
-                        "this SHA-256 fingerprint with a trusted source before "
-                        "saving it for this profile.\n\n%3\n\nHTTPS "
-                        "verification remains enabled. Future console "
-                        "certificate changes will be blocked.")
+                QString(
+                    "The console at %1:%2 could not be verified. Compare "
+                    "this SHA-256 fingerprint with a trusted source before "
+                    "saving it for this profile.\n\n%3\n\nHTTPS "
+                    "verification remains enabled. Future console "
+                    "certificate changes will be blocked.")
                     .arg(host)
                     .arg(port)
                     .arg(fingerprint),
@@ -294,8 +295,9 @@ MainWindow::Tab* MainWindow::addTab(const QString& name)
                         {"port", port},
                         {"sha256", fingerprint}};
                     saved["consoleTrust"] = pin;
-                    if (!profiles->save(saved.value("name").toString(), saved))
-                    {
+                    if (!profiles->save(
+                            saved.value("name").toString(),
+                            saved)) {
                         QMessageBox::warning(
                             this,
                             "Cannot save certificate",
@@ -627,9 +629,9 @@ void MainWindow::makeMenus()
         "Size window to host",
         [this]
         {
-            if (current() && !current()->console->frameSize().isEmpty()) {
+            if (current() && !current()->console->remoteFrameSize().isEmpty()) {
                 resize(
-                    current()->console->frameSize() +
+                    current()->console->remoteFrameSize() +
                     QSize(
                         24,
                         menuBar()->height() + statusBar()->height() +
@@ -1194,8 +1196,9 @@ void MainWindow::paste()
         QMessageBox::question(
             this,
             "Paste to host",
-            QString("Type clipboard text using the host's US keyboard "
-                    "layout?\n%1 unsupported characters will be skipped.")
+            QString(
+                "Type clipboard text using the host's US keyboard "
+                "layout?\n%1 unsupported characters will be skipped.")
                 .arg(skipped)) != QMessageBox::Yes)
     {
         return;
