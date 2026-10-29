@@ -44,7 +44,15 @@ jobs:
         run: |
           python -m pip install aqtinstall==3.3.0
           python -m aqt install-qt linux android 6.8.3 android_arm64_v8a -O qt-android
-          scripts/build_android_openssl.sh openssl-android openssl-work "$ANDROID_HOME/ndk/26.1.10909125"
+          bash scripts/build_android_openssl.sh openssl-android openssl-work "$ANDROID_HOME/ndk/26.1.10909125"
+      - name: Save prepared Android libraries
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            qt-android
+            openssl-android
+          key: android-arm64-qt6.8.3-ndk26.1-openssl3.5.9-v1
       - name: Include Qt licenses
         run: |
           for name in LGPL-3.0-only GPL-3.0-only; do
