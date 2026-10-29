@@ -43,3 +43,5 @@ https://github.com/joseluisq/macosx-sdks/releases/tag/14.5 (SHA256 pinned in the
 setup script). Apple SDKs retain Apple's license; the SDK is a build input and
 is not included in application ZIPs. rcodesign 0.29.0 creates ad-hoc signatures
 on Linux; it is also a build tool and is not included in application ZIPs.
+
+Android preview APKs also bundle OpenSSL 3.5.9 under Apache-2.0; the build script retains its LICENSE.txt as OpenSSL.txt in the library output. Qt Quick/Controls use the same Qt licensing terms described above.

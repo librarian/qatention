@@ -1,0 +1,72 @@
+name: Android preview
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Build dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build patchelf libgl1-mesa-dev libxkbcommon-dev
+      - name: Android SDK
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" "ndk;26.1.10909125"'
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: linux_gcc_64
+          cache: true
+      - name: Test mobile interface on Linux
+        run: |
+          cmake -S . -B build-mobile -G Ninja -DQATENTION_MOBILE=ON
+          cmake --build build-mobile --parallel 3
+          QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software build-mobile/qatention --smoke-test
+      - name: Cache Android Qt and OpenSSL
+        id: cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            qt-android
+            openssl-android
+          key: android-arm64-qt6.8.3-ndk26.1-openssl3.5.9-v1
+      - name: Prepare Android libraries
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          python -m pip install aqtinstall==3.3.0
+          python -m aqt install-qt linux android 6.8.3 android_arm64_v8a -O qt-android
+          scripts/build_android_openssl.sh openssl-android openssl-work "$ANDROID_HOME/ndk/26.1.10909125"
+      - name: Include Qt licenses
+        run: |
+          for name in LGPL-3.0-only GPL-3.0-only; do
+            curl --fail --location "https://raw.githubusercontent.com/qt/qtbase/v6.8.3/LICENSES/$name.txt" -o "openssl-android/$name.txt"
+          done
+      - name: Build APK
+        run: |
+          qt-android/6.8.3/android_arm64_v8a/bin/qt-cmake -S . -B build-android -G Ninja \
+            -DQT_HOST_PATH="$QT_ROOT_DIR" -DANDROID_SDK_ROOT="$ANDROID_HOME" \
+            -DANDROID_NDK_ROOT="$ANDROID_HOME/ndk/26.1.10909125" \
+            -DANDROID_OPENSSL_DIR="$PWD/openssl-android" -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build-android --target apk --parallel 3
+      - name: Verify and stage APK
+        run: |
+          mkdir -p dist-android
+          apk=build-android/android-build/build/outputs/apk/debug/android-build-debug.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "$apk"
+          unzip -l "$apk" | grep 'lib/arm64-v8a/libssl_3.so'
+          unzip -l "$apk" | grep 'lib/arm64-v8a/libcrypto_3.so'
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$apk" | grep 'android.permission.INTERNET'
+          cp "$apk" dist-android/qatention-android-arm64-preview.apk
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          path: dist-android/qatention-android-arm64-preview.apk
+          archive: false

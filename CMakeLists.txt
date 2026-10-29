@@ -3,7 +3,12 @@ project(qatention VERSION 0.2.0 LANGUAGES C CXX)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Network Widgets Test)
+option(QATENTION_MOBILE "Build the Qt Quick mobile interface (also available on desktop for testing)" OFF)
+if(ANDROID OR QATENTION_MOBILE)
+    find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Network Quick QuickControls2)
+else()
+    find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Network Widgets Test)
+endif()
 qt_standard_project_setup(REQUIRES 6.8)
 include(GNUInstallDirs)
 
@@ -26,6 +31,30 @@ if(WIN32)
 endif()
 qt_add_resources(qatention_core vendor_certificate PREFIX / FILES
     resources/client.pfx resources/client-cert.pem resources/client-key.pem)
+
+if(ANDROID OR QATENTION_MOBILE)
+    qt_add_executable(qatention src/mobile/main.cpp src/mobile/mobile.cpp src/mobile/mobile.h)
+    target_link_libraries(qatention PRIVATE qatention_core Qt6::Quick Qt6::QuickControls2)
+    qt_add_resources(qatention mobile_licenses PREFIX /licenses FILES LICENSE THIRD_PARTY.md)
+    qt_add_qml_module(qatention URI QatentionMobile VERSION 1.0 QML_FILES src/mobile/Main.qml)
+    if(ANDROID)
+        if(NOT EXISTS "${ANDROID_OPENSSL_DIR}/libssl_3.so")
+            message(FATAL_ERROR "Set ANDROID_OPENSSL_DIR to the ARM64 OpenSSL library directory")
+        endif()
+        file(GLOB android_license_files "${ANDROID_OPENSSL_DIR}/*.txt")
+        qt_add_resources(qatention android_licenses PREFIX /licenses BASE "${ANDROID_OPENSSL_DIR}" FILES ${android_license_files})
+        target_link_options(qatention PRIVATE "-Wl,-z,max-page-size=16384")
+        set_target_properties(qatention PROPERTIES
+            QT_ANDROID_PACKAGE_NAME org.libc6.qatention
+            QT_ANDROID_APP_NAME QATENtion
+            QT_ANDROID_MIN_SDK_VERSION 28
+            QT_ANDROID_TARGET_SDK_VERSION 35
+            QT_ANDROID_VERSION_CODE 1
+            QT_ANDROID_VERSION_NAME "0.2.0-preview1"
+            QT_ANDROID_EXTRA_LIBS "${ANDROID_OPENSSL_DIR}/libcrypto_3.so;${ANDROID_OPENSSL_DIR}/libssl_3.so")
+    endif()
+    return()
+endif()
 
 qt_add_executable(qatention-capture src/capture.cpp)
 target_link_libraries(qatention-capture PRIVATE qatention_core)

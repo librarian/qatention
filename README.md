@@ -250,3 +250,42 @@ profile later. Configured tabs retain their normal selection behavior.
 
 Startup restores saved tabs disconnected and opens the profile selection dialog.
 Connections start only after an explicit Connect or Reconnect action.
+
+## Android preview
+
+The Android ARM64 preview shares the desktop C++ protocol/decoder core and uses a
+separate Qt Quick Material interface. It supports one connection, live video,
+direct touch-to-pointer input (tap/drag = left mouse), arrow/Esc/Tab/Enter/Backspace
+buttons, Ctrl+Alt+Del, refresh, and sending up to 256 US-layout ASCII characters.
+Logs can be viewed and copied from the Logs dialog. Keyboard input is released
+and video polling paused when the application leaves the foreground.
+
+Startup shows the connection form without connecting automatically. The preview
+remembers the last host and username, but **does not save passwords**. It supports
+strict HTTPS verification with missing-intermediate recovery and explicit console
+certificate trust, stored per host. It does not yet offer multiple profiles,
+Android Keystore password storage, media mounting, zoom/pan, or background-session
+guarantees. Desktop profiles and UI are unaffected.
+
+The **Android preview** GitHub Actions workflow builds on Ubuntu and publishes
+`qatention-android-arm64-preview.apk`, an installable debug-signed APK for ARM64
+Android 9/API 28 or newer. Download it on your phone and allow installation from
+that download source. Development signing keys may change between CI runners;
+if Android refuses an update because of a signature mismatch, uninstall the old
+preview first (this removes its saved settings and console trust).
+
+For the first device test: connect, confirm video changes, tap/drag on the video,
+send text/Enter, and switch away from and back to the app. Use Logs → Copy when
+reporting a problem. Actual device behavior is not established by a successful
+cross-build; the workflow also runs the mobile UI/TLS smoke test on Linux.
+
+Build locally with Qt 6.8.3 host + Android ARM64 packages, JDK 17, Android SDK 35,
+and NDK 26.1.10909125, following `.github/workflows/android.yml`. OpenSSL 3.5.9 is
+built from checksum-verified source with `scripts/build_android_openssl.sh` and
+bundled under Android-specific library names. To test the interface on desktop:
+
+```sh
+cmake -S . -B build-mobile -DQATENTION_MOBILE=ON
+cmake --build build-mobile
+build-mobile/qatention
+```
