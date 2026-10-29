@@ -25,6 +25,7 @@ private:
         aten::Media *media;
         QVariantMap options;
         QString name;
+        int id;
     };
     aten::Profiles *profiles;
     aten::DebugLog *log;
@@ -35,6 +36,7 @@ private:
     QList<QAction*> onlineActions;
     QAction *actualAction,*smoothAction,*backgroundAction,*reopenAction,*reconnectAction,*mountAction,*unmountAction;
     int fps=0,fullSeconds=5,quality=11,mode=444;
+    int nextTabId=1;
     bool smoke=false,closing=false;
     Tab *current() const;
     Tab *addTab(const QString &name={});

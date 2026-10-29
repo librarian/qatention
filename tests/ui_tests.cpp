@@ -22,6 +22,7 @@ private slots:
         });
         dismiss.start();
         plus->click();QCOMPARE(tabs->count(),2);
+        QVERIFY(tabs->tabText(0).endsWith("[1]"));QVERIFY(tabs->tabText(1).endsWith("[2]"));
         tabs->setCurrentIndex(0);QCOMPARE(tabs->currentIndex(),0);
         QVERIFY(QMetaObject::invokeMethod(tabs,"tabCloseRequested",Q_ARG(int,1)));QCOMPARE(tabs->count(),1);
         bool found=false;

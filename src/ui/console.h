@@ -14,10 +14,12 @@ public:
     QSize frameSize() const { return frame.size(); }
     void setView(bool actual,bool smooth);
     void cancelInput() { release(); }
+    void setDiagnostics(bool enabled) { diagnostics=enabled; }
     void paste(const QString &text);
     static quint32 characterUsage(QChar c,bool &shift);
     Q_INVOKABLE bool saveScreenshot(const QUrl &file);
 signals:
+    void diagnostic(const QString &message);
     void sessionChanged();
     void isoDropped(const QString &path);
 protected:
@@ -34,6 +36,8 @@ protected:
 private:
     QPointer<aten::Session> connection;
     QImage frame;
+    quint64 receivedFrames=0,paintedFrame=0,paintEvents=0;
+    bool diagnostics=false;
     bool actual=false,smooth=false;
     QTimer pasteTimer;
     QString pasteText;

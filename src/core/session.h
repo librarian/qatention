@@ -70,6 +70,7 @@ private:
     int powerState=-1,quality=11,imageMode=444,fullSeconds=5;
     bool streaming=true;
     quint64 videoBytes=0,frames=0;
+    quint64 requests=0,fullRequests=0,updates=0,keyEvents=0,pointerEvents=0,rejectedInput=0;
     QElapsedTimer uptime,powerPoll;
     std::unique_ptr<Decoder> decoder;
     QUrl baseUrl;

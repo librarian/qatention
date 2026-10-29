@@ -10,6 +10,7 @@
 #include <windows.h>
 #endif
 #include <QUrl>
+#include <QCryptographicHash>
 
 // Semantic US-keyboard fallback. Physical layout support is deliberately isolated here.
 static quint32 usageFor(int key) {
@@ -66,6 +67,15 @@ static quint32 physicalUsage(QKeyEvent *e) {
     return usageFor(e->key());
 }
 Console::Console(QWidget *parent):QWidget(parent) {
+    auto *stats=new QTimer(this);stats->setInterval(1000);
+    connect(stats,&QTimer::timeout,this,[this]{
+        if(diagnostics && connection && connection->connected()) {
+            const auto hash=frame.isNull()?QByteArray("none"):QCryptographicHash::hash(
+                QByteArrayView(reinterpret_cast<const char*>(frame.constBits()),frame.sizeInBytes()),QCryptographicHash::Sha256).toHex();
+            emit diagnostic(QString("View: received=%1 painted=%2 paints=%3 visible=%4 focused=%5 size=%6x%7 imageSha256=%8")
+                .arg(receivedFrames).arg(paintedFrame).arg(paintEvents).arg(isVisible()).arg(hasFocus()).arg(width()).arg(height()).arg(QString::fromLatin1(hash)));
+        }
+    });stats->start();
     setFocusPolicy(Qt::StrongFocus);setMouseTracking(true);setAcceptDrops(true);
     pasteTimer.setInterval(20);
     connect(&pasteTimer,&QTimer::timeout,this,[this]{
@@ -94,7 +104,7 @@ void Console::setSession(aten::Session *s) {
     release(); if(connection) disconnect(connection,nullptr,this,nullptr);
     connection=s;
     if(s) {
-        connect(s,&aten::Session::frameReady,this,[this](const QImage &image){frame=image;if(actual) setMinimumSize(frame.size());update();});
+        connect(s,&aten::Session::frameReady,this,[this](const QImage &image){++receivedFrames;frame=image;if(actual) setMinimumSize(frame.size());update();});
         connect(s,&aten::Session::clearFrame,this,[this]{release();frame={};setMinimumSize(1,1);update();});
     }
     emit sessionChanged();
@@ -105,6 +115,7 @@ QRectF Console::imageRect() const {
     return {(width()-scaled.width())/2,(height()-scaled.height())/2,scaled.width(),scaled.height()};
 }
 void Console::paintEvent(QPaintEvent *) {
+    ++paintEvents;paintedFrame=receivedFrames;
     QPainter painter(this);auto *p=&painter;p->fillRect(rect(),Qt::black);
     if(frame.isNull()) {p->setPen(Qt::white);p->drawText(rect().adjusted(20,20,-20,-20),Qt::AlignCenter|Qt::TextWordWrap,connection?connection->status():"Disconnected");return;}
     p->setRenderHint(QPainter::SmoothPixmapTransform,smooth);p->drawImage(imageRect(),frame);

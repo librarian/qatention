@@ -26,6 +26,8 @@ Session::Session(QObject *parent):QObject(parent) {
     heartbeat.setInterval(3000);
     connect(&heartbeat,&QTimer::timeout,this,[this]{
         if(!connected()) return;
+        emit diagnostic(QString("Pipeline: requests=%1 full=%2 replies=%3 decoded=%4 pending=%5 streaming=%6 keys=%7 pointers=%8 rejectedInput=%9")
+            .arg(requests).arg(fullRequests).arg(updates).arg(frames).arg(pending).arg(streaming).arg(keyEvents).arg(pointerEvents).arg(rejectedInput));
         if(received.elapsed()>60000) { fail("BMC stopped responding",true); return; }
         send(QByteArray::fromHex("150000000100000000"));
         if(powerPoll.elapsed()>=10000) {send(QByteArray(1,0x37));powerPoll.restart();}
@@ -45,7 +47,7 @@ void Session::reportTlsErrors(const QString &endpoint,const QList<QSslError> &er
     }
     tlsFailure=endpoint+" certificate validation failed: "+details.join("; ");
 }
-void Session::setStatus(const QString &text) { statusText=text; emit diagnostic(text); emit stateChanged(); }
+void Session::setStatus(const QString &text) { if(statusText==text) return;statusText=text; emit diagnostic(text); emit stateChanged(); }
 void Session::close() {
     retry.stop(); reconnectOptions.clear(); established=false; retryCount=0;
     resetTransport(); mediaLaunch={};
@@ -76,6 +78,7 @@ void Session::resetTransport() {
     web.setCookieJar(new QNetworkCookieJar(&web));
     tlsFailure.clear();
     buffer.clear(); launch={}; decoder.reset(); pending=false; forceFull=false; controlling=true;
+    requests=fullRequests=updates=keyEvents=pointerEvents=rejectedInput=0;
     phase=Phase::Idle; emit clearFrame(); setStatus("Disconnected");
 }
 void Session::fail(const QString &text,bool transient) {
@@ -283,7 +286,7 @@ bool Session::consumeMessage() {
             }
             pos+=20+n;
         }
-        buffer.remove(0,length); pending=false;videoBytes+=quint64(length);
+        buffer.remove(0,length); pending=false;videoBytes+=quint64(length);++updates;
         if(noSignal) { emit clearFrame(); setStatus("Connected — no video signal"); }
         else if(changed) { ++frames;emit frameReady(decoder->image()); setStatus(controlling?"Connected — controlling":"Connected — view only"); }
         nextFrame.start(frameInterval); return true;
@@ -332,18 +335,21 @@ void Session::requestFrame() {
     // and the watchdog may supersede an outstanding incremental request.
     if(pending && !forceFull && !periodic && !overdue) return;
     forceFull=false; pending=true;
+    ++requests;if(full) ++fullRequests;
     frameRequested.restart();
     send(updateRequest(decoder->image().size(),!full));
     if(full) fullFrame.restart();
 }
 void Session::refresh() { forceFull=true; requestFrame(); }
 void Session::key(quint32 usage,bool down) {
-    if(!connected() || !controlling || !usage) return;
+    if(!connected() || !controlling || !usage) {++rejectedInput;return;}
+    ++keyEvents;
     if(down) held.insert(usage); else held.remove(usage);
     send(keyEvent(usage,down));
 }
 void Session::pointer(int x,int y,int mask) {
-    if(!connected() || !controlling) return;
+    if(!connected() || !controlling) {++rejectedInput;return;}
+    ++pointerEvents;
     lastPointer={qBound(0,x,decoder->image().width()-1),qBound(0,y,decoder->image().height()-1)};
     buttons=mask; send(pointerEvent(lastPointer.x(),lastPointer.y(),mask));
 }
@@ -369,6 +375,8 @@ void Session::setDisplay(int q,int mode) {
     if(connected()) {QByteArray b(5,0);b[0]=0x32;b[2]=char(quality);put16(b,3,quint16(imageMode));send(b);refresh();}
 }
 void Session::setStreaming(bool active,int interval,int full) {
+    if(streaming!=active || frameInterval!=qBound(0,interval,1000) || fullSeconds!=qBound(-1,full,60))
+        emit diagnostic(QString("Streaming: active=%1 intervalMs=%2 fullSeconds=%3 pending=%4").arg(active).arg(interval).arg(full).arg(pending));
     const bool resumed=!streaming && active;streaming=active;frameInterval=qBound(0,interval,1000);fullSeconds=qBound(-1,full,60);
     if(!active) nextFrame.stop();else {if(resumed) forceFull=true;requestFrame();}
 }

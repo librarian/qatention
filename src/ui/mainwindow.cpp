@@ -34,6 +34,7 @@ MainWindow::MainWindow(aten::Profiles *p,aten::DebugLog *l,bool test):profiles(p
     connect(plus,&QToolButton::clicked,this,[this]{addTab();connectionDialog();});
     connect(tabs,&QTabWidget::tabCloseRequested,this,&MainWindow::closeTab);
     connect(tabs,&QTabWidget::currentChanged,this,[this]{
+        if(auto *t=current()) log->write(QString("[tab %1 | %2] Selected").arg(t->id).arg(t->name));
         for(auto *t:sessions) t->console->cancelInput();
         applyPreferences();updateTabs();
     });
@@ -75,12 +76,16 @@ MainWindow::Tab *MainWindow::current() const {
 }
 MainWindow::Tab *MainWindow::addTab(const QString &name) {
     auto *scroll=new QScrollArea(tabs);auto *console=new Console(scroll);scroll->setWidget(console);scroll->setWidgetResizable(true);
-    auto *t=new Tab{console,scroll,new aten::Session(console),new aten::Media(console),{},name};
+    auto *t=new Tab{console,scroll,new aten::Session(console),new aten::Media(console),{},name,nextTabId++};
     console->setSession(t->session);sessions.append(t);
+    console->setDiagnostics(log->enabled());
+    connect(log,&aten::DebugLog::enabledChanged,console,[this,console]{console->setDiagnostics(log->enabled());});
     connect(t->session,&aten::Session::stateChanged,this,[this,t]{t->console->update();updateTabs();});
-    connect(t->session,&aten::Session::diagnostic,this,[this,t](const QString &s){log->write("["+t->name+"] "+s);});
+    auto diagnostic=[this,t](const QString &s){log->write(QString("[tab %1 | %2] %3").arg(t->id).arg(t->name,s));};
+    connect(t->session,&aten::Session::diagnostic,this,diagnostic);
+    connect(console,&Console::diagnostic,this,diagnostic);
     connect(t->session,&aten::Session::unsupportedFrame,log,&aten::DebugLog::capture);
-    connect(t->media,&aten::Media::diagnostic,this,[this,t](const QString &s){log->write("["+t->name+"] "+s);});
+    connect(t->media,&aten::Media::diagnostic,this,diagnostic);
     connect(t->media,&aten::Media::changed,this,[this,t]{t->session->setKeepMedia(t->media->busy());updateTabs();});
     connect(console,&Console::isoDropped,this,&MainWindow::mountIso);
     tabs->setCurrentIndex(tabs->addTab(scroll,name.isEmpty()?"New session":name));
@@ -101,7 +106,7 @@ void MainWindow::updateTabs() {
     auto *active=current();
     for(auto *t:sessions) {
         const int i=tabs->indexOf(t->scroll);if(i<0) continue;
-        tabs->setTabText(i,t->name.isEmpty()?"New session":t->name);
+        tabs->setTabText(i,QString("%1 [%2]").arg(t->name.isEmpty()?"New session":t->name).arg(t->id));
         tabs->setTabToolTip(i,t->session->status()+"\n"+t->media->status());
         QPixmap icon(12,12);icon.fill(Qt::transparent);QPainter painter(&icon);painter.setPen(Qt::NoPen);
         painter.setBrush(t->session->connected()?(t->session->hostPower()==0?QColor(Qt::gray):QColor(40,160,70)):QColor(Qt::gray));
