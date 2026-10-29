@@ -104,6 +104,18 @@ revalidated on reuse. They are never installed as trusted roots or imported into
 Keychain. Debug logging reports retrieval and validation. This does not accept
 self-signed console/media certificates or change the unverified setting.
 
+When strict verification encounters an untrusted console certificate, the GUI
+shows its endpoint and SHA-256 fingerprint. **Trust and save** stores that exact
+fingerprint and endpoint in the selected profile and reconnects. Cancel leaves
+the connection blocked. Saved pins are checked even when ordinary TLS validation
+succeeds or the broad compatibility checkbox is enabled; changed certificates,
+changed endpoints, and plaintext downgrades are rejected. A pin permits the
+expected self-signed/hostname trust errors, not expiry or invalid signatures.
+Use **Forget trusted console certificate** in the profile editor and Connect to
+explicitly clear an old pin before reviewing a replacement. HTTPS and virtual
+media certificate policies are unaffected. The command-line client does not
+interactively grant trust.
+
 Web login acquires fresh console tokens. Java-interface switching is opt-in.
 Automatic reconnect allows 30 attempts: five seconds between the first five,
 then thirty seconds. Receiving a console message resets the budget. Authentication

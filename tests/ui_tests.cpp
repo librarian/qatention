@@ -3,10 +3,25 @@
 #include <QMenuBar>
 #include <QToolButton>
 #include <QDialog>
+#include <QMessageBox>
+#include <QPushButton>
+#include <QFile>
 #include "ui/mainwindow.h"
 class UiTests : public QObject {
     Q_OBJECT
 private slots:
+    void consoleTrustDialogCancel() {
+        QTemporaryDir dir;aten::Profiles profiles(dir.filePath("profiles.json"));aten::DebugLog log(dir.filePath("log"));
+        MainWindow window(&profiles,&log,true);window.show();
+        auto *session=window.findChild<aten::Session*>();QVERIFY(session);
+        QFile f(":/resources/client-cert.pem");QVERIFY(f.open(QIODevice::ReadOnly));
+        session->consoleCertificateUntrusted("bmc.example",5900,QSslCertificate(f.readAll()));
+        auto *dialog=window.findChild<QMessageBox*>("consoleCertificateTrustDialog");QVERIFY(dialog);
+        QCOMPARE(dialog->defaultButton(),dialog->button(QMessageBox::Cancel));
+        QVERIFY(dialog->text().contains("bmc.example:5900"));
+        dialog->button(QMessageBox::Cancel)->click();
+        QVERIFY(profiles.entries().isEmpty());QVERIFY(!session->busy());
+    }
     void menusTabsAndView() {
         QTemporaryDir dir;aten::Profiles profiles(dir.filePath("profiles.json"));aten::DebugLog log(dir.filePath("log"));
         MainWindow window(&profiles,&log,true);window.show();

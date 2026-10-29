@@ -31,10 +31,11 @@ public:
     quint16 consolePort=0;
     QSslKey key;
     QSslCertificate cert;
+    QList<QSslCertificate> chain;
     void incomingConnection(qintptr descriptor) override {
         auto *socket=new QSslSocket(this);
         socket->setSocketDescriptor(descriptor);
-        socket->setLocalCertificate(cert); socket->setPrivateKey(key);
+        socket->setLocalCertificate(cert); if(!chain.isEmpty()) socket->setLocalCertificateChain(chain); socket->setPrivateKey(key);
         socket->setPeerVerifyMode(QSslSocket::VerifyNone);
         auto data=std::make_shared<QByteArray>();
         connect(socket,&QSslSocket::readyRead,this,[this,socket,data]{
@@ -59,6 +60,31 @@ public:
 class CoreTests : public QObject {
     Q_OBJECT
 private slots:
+    void consoleCertificatePinning() {
+        auto load=[](const char *name){QFile f(QString(":/tls/tests/certificates/")+name);f.open(QIODevice::ReadOnly);return f.readAll();};
+        WebBmc bmc;bmc.cert=QSslCertificate(load("leaf.pem"));bmc.key=QSslKey(load("leaf.key"),QSsl::Rsa);
+        QVERIFY(bmc.listen(QHostAddress::LocalHost));
+        QVariantMap options{{"host","localhost"},{"port",bmc.serverPort()},{"user","admin"},{"password","password"},{"autoArm",false},{"tls",true},{"allowUntrusted",false}};
+        Session session;QSignalSpy prompt(&session,&Session::consoleCertificateUntrusted);
+        session.open(options);QTRY_COMPARE(prompt.size(),1);QVERIFY(!session.busy());
+        const QVariantMap pin{{"host","localhost"},{"port",bmc.serverPort()},{"sha256",QString::fromLatin1(bmc.cert.digest(QCryptographicHash::Sha256).toHex())}};
+        options["consoleTrust"]=pin;
+        session.open(options);QTRY_COMPARE(session.status(),QString("Authenticating console…"));
+        QCOMPARE(prompt.size(),1);session.close();
+        // Pin mismatch must reject even a normally trusted certificate and the broad compatibility setting.
+        const auto original=QSslConfiguration::defaultConfiguration();
+        struct Restore { QSslConfiguration config; ~Restore(){QSslConfiguration::setDefaultConfiguration(config);} } restore{original};
+        auto config=original;config.setCaCertificates({QSslCertificate(load("root.pem"))});QSslConfiguration::setDefaultConfiguration(config);
+        bmc.chain={bmc.cert,QSslCertificate(load("issuer.pem"))};
+        auto wrong=pin;wrong["sha256"]=QString(64,'0');options["consoleTrust"]=wrong;options["allowUntrusted"]=true;
+        session.open(options);QTRY_VERIFY(!session.busy());
+        QVERIFY(session.status().contains("changed"));QCOMPARE(prompt.size(),1);
+        options["consoleTrust"]=pin;options["tls"]=false;
+        session.open(options);QTRY_VERIFY(!session.busy());QVERIFY(session.status().contains("changed"));
+        QTemporaryDir dir;Profiles profiles(dir.filePath("profiles.json"));
+        options["consoleTrust"]=pin;QVERIFY(profiles.save("BMC",options));
+        Profiles reloaded(dir.filePath("profiles.json"));QCOMPARE(reloaded.entries().first().toMap().value("consoleTrust").toMap(),pin);
+    }
     void httpsMissingIntermediate() {
         auto load=[](const char *name){QFile f(QString(":/tls/tests/certificates/")+name);f.open(QIODevice::ReadOnly);return f.readAll();};
         const auto original=QSslConfiguration::defaultConfiguration();

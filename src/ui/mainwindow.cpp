@@ -1,3 +1,4 @@
+#include <QCryptographicHash>
 #include "mainwindow.h"
 #include <QApplication>
 #include <QActionGroup>
@@ -93,6 +94,31 @@ MainWindow::Tab *MainWindow::addTab(const QString &name) {
     connect(t->session,&aten::Session::stateChanged,this,[this,t]{t->console->update();applyPreferences();updateTabs();});
     auto diagnostic=[this,t](const QString &s){log->write(QString("[tab %1 | %2] %3").arg(t->id).arg(t->name,s));};
     connect(t->session,&aten::Session::diagnostic,this,diagnostic);
+    connect(t->session,&aten::Session::consoleCertificateUntrusted,this,[this,t](const QString &host,quint16 port,const QSslCertificate &cert){
+        const auto snapshot=t->options;
+        const auto fingerprint=QString::fromLatin1(cert.digest(QCryptographicHash::Sha256).toHex());
+        auto *box=new QMessageBox(QMessageBox::Warning,"Trust console certificate?",
+            QString("The console at %1:%2 could not be verified. Compare this SHA-256 fingerprint with a trusted source before saving it for this profile.\n\n%3\n\nHTTPS verification remains enabled. Future console certificate changes will be blocked.").arg(host).arg(port).arg(fingerprint),QMessageBox::Cancel,t->console);
+        box->setObjectName("consoleCertificateTrustDialog");box->setTextFormat(Qt::PlainText);
+        box->setDetailedText("Subject: "+cert.subjectInfo(QSslCertificate::CommonName).join(", ")+"\nIssuer: "+cert.issuerInfo(QSslCertificate::CommonName).join(", ")+"\nExpires: "+cert.expiryDate().toString(Qt::ISODate));
+        auto *trust=box->addButton("Trust and save",QMessageBox::AcceptRole);
+        box->setDefaultButton(QMessageBox::Cancel);box->setAttribute(Qt::WA_DeleteOnClose);
+        QPointer<aten::Session> session=t->session;
+        connect(box,&QMessageBox::finished,this,[this,t,session,box,trust,snapshot,host,port,fingerprint]{
+            if(box->clickedButton()!=trust || !session || !sessions.contains(t) || t->session!=session || t->options!=snapshot || session->busy()) return;
+            QVariantMap saved;
+            for(const auto &v:profiles->entries()) if(v.toMap().value("name")==snapshot.value("name")) saved=v.toMap();
+            if(saved.isEmpty() || saved.value("host")!=snapshot.value("host") || saved.value("consoleTrust")!=snapshot.value("consoleTrust")) {
+                QMessageBox::warning(this,"Profile changed","The profile changed while this dialog was open. Connect again to review its certificate.");return;
+            }
+            const QVariantMap pin{{"host",host},{"port",port},{"sha256",fingerprint}};
+            saved["consoleTrust"]=pin;
+            if(!profiles->save(saved.value("name").toString(),saved)) {QMessageBox::warning(this,"Cannot save certificate",profiles->error());return;}
+            t->options["consoleTrust"]=pin;
+            session->open(t->options);
+        });
+        box->open();
+    });
     connect(console,&Console::diagnostic,this,diagnostic);
     if(!traceFolder.isEmpty() && !t->session->startVideoTrace(traceFolder+QString("/tab-%1.jsonl").arg(t->id)))
         diagnostic("Cannot start video trace");
@@ -262,8 +288,12 @@ void MainWindow::connectionDialog() {
     form->addRow("Saved profile",profileRow);form->addRow("Name",name);form->addRow("Host",host);form->addRow(arm);
     form->addRow("Username / token",user);form->addRow("Password / token",password);form->addRow("HTTPS port",webPort);form->addRow("Console port",port);form->addRow(tls);form->addRow(untrusted);form->addRow(java);
     auto *note=new QLabel("Connect saves this profile, including credentials, on this computer. ATEN BMCs may use separate self-signed certificates for the console and media.",fields);note->setWordWrap(true);form->addRow(note);
+    QVariantMap savedTrust;
+    auto *forgetTrust=new QPushButton("Forget trusted console certificate",fields);form->addRow(forgetTrust);
+    forgetTrust->setObjectName("forgetConsoleCertificate");
+    connect(forgetTrust,&QPushButton::clicked,&dialog,[&]{savedTrust.clear();forgetTrust->setEnabled(false);});
     auto reload=[&]{picker->clear();picker->addItem("New profile");for(const auto &v:profiles->entries()) picker->addItem(v.toMap().value("name").toString(),v);};reload();
-    auto load=[&](const QVariantMap &o){name->setText(o.value("name").toString());host->setText(o.value("host").toString());user->setText(o.value("user","ADMIN").toString());password->setText(o.value("password").toString());arm->setChecked(o.value("autoArm",true).toBool());tls->setChecked(o.value("tls",true).toBool());untrusted->setChecked(o.value("allowUntrusted",true).toBool());java->setChecked(o.value("switchJava",false).toBool());port->setValue(o.value("port",5900).toInt());webPort->setValue(o.value("webPort",443).toInt());};
+    auto load=[&](const QVariantMap &o){savedTrust=o.value("consoleTrust").toMap();forgetTrust->setEnabled(!savedTrust.isEmpty());forgetTrust->setToolTip(savedTrust.value("sha256").toString());name->setText(o.value("name").toString());host->setText(o.value("host").toString());user->setText(o.value("user","ADMIN").toString());password->setText(o.value("password").toString());arm->setChecked(o.value("autoArm",true).toBool());tls->setChecked(o.value("tls",true).toBool());untrusted->setChecked(o.value("allowUntrusted",true).toBool());java->setChecked(o.value("switchJava",false).toBool());port->setValue(o.value("port",5900).toInt());webPort->setValue(o.value("webPort",443).toInt());};
     connect(picker,&QComboBox::activated,&dialog,[&](int){load(picker->currentData().toMap());});
     connect(newProfile,&QPushButton::clicked,&dialog,[&]{picker->setCurrentIndex(0);load({});});
     connect(remove,&QPushButton::clicked,&dialog,[&]{
@@ -278,6 +308,7 @@ void MainWindow::connectionDialog() {
         if(t->media->busy() && QMessageBox::question(&dialog,"Change connection","Unmount the ISO and change this connection?")!=QMessageBox::Yes) return;
         const QString label=name->text().trimmed().isEmpty()?host->text().trimmed():name->text().trimmed();
         QVariantMap o={{"host",host->text().trimmed()},{"user",user->text()},{"password",password->text()},{"autoArm",arm->isChecked()},{"tls",tls->isChecked()},{"allowUntrusted",untrusted->isChecked()},{"switchJava",java->isChecked()},{"port",port->value()},{"webPort",webPort->value()},{"autoReconnect",reconnectAction->isChecked()},{"name",label}};
+        if(!savedTrust.isEmpty()) o["consoleTrust"]=savedTrust;
         if(!profiles->save(label,o)) {QMessageBox::warning(&dialog,"Cannot save profile",profiles->error());return;}
         t->media->unmount();t->options=o;t->name=label;t->session->setDisplay(quality,mode);t->session->open(o);applyPreferences();dialog.accept();
     });

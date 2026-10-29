@@ -13,7 +13,7 @@
 namespace aten {
 QVariantMap Profiles::sanitize(const QVariantMap &o) {
     QVariantMap result;
-    for(const auto &key : {"host","user","password","autoArm","port","tls","webPort","allowUntrusted","switchJava","frameInterval","autoReconnect"})
+    for(const auto &key : {"host","user","password","autoArm","port","tls","webPort","allowUntrusted","switchJava","frameInterval","autoReconnect","consoleTrust"})
         if(o.contains(key)) result[key]=o[key];
     return result;
 }

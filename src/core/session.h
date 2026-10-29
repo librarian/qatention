@@ -48,6 +48,7 @@ public:
 
     void pointer(int x,int y,int buttons);
 signals:
+    void consoleCertificateUntrusted(const QString &host,quint16 port,const QSslCertificate &certificate);
     void videoPacket(const QByteArray &packet,quint32 encoding);
     void diagnostic(const QString &message);
     void unsupportedFrame(const QByteArray &packet);
@@ -66,7 +67,8 @@ private:
     QPointer<QObject> issuerFetch;
     QNetworkAccessManager web;
     QTimer deadline, heartbeat, nextFrame, retry;
-    QVariantMap reconnectOptions;
+    QVariantMap reconnectOptions, consoleTrust;
+    QSslCertificate consoleCandidate;
     bool established=false;
     int retryCount=0;
     QElapsedTimer received, fullFrame, frameRequested;

@@ -83,7 +83,7 @@ void Session::resetTransport() {
         webAuthenticated=false;
     }
     web.setCookieJar(new QNetworkCookieJar(&web));
-    tlsFailure.clear();
+    tlsFailure.clear(); consoleCandidate=QSslCertificate();
     buffer.clear(); launch={}; decoder.reset(); pending=false; forceFull=false; controlling=true;
     if(videoTrace.active()) videoTrace.record({{"type","reset"}});
     requests=fullRequests=updates=keyEvents=pointerEvents=rejectedInput=0;
@@ -107,6 +107,7 @@ void Session::open(const QVariantMap &o) {
 }
 void Session::startAttempt(const QVariantMap &o) {
     try {
+        consoleTrust=o.value("consoleTrust").toMap();
         allowUntrusted=o.value("allowUntrusted",true).toBool(); switchJava=o.value("switchJava").toBool();
         // Streaming cadence is controlled by the View menu and survives reconnects.
         launch.host=o.value("host").toString().trimmed();
@@ -219,9 +220,22 @@ void Session::connectKvm() {
     connect(socket,&QSslSocket::readyRead,this,&Session::process);
     connect(socket,&QSslSocket::disconnected,this,[this]{if(busy()) fail("BMC disconnected",true);});
     connect(socket,&QSslSocket::errorOccurred,this,[this](QAbstractSocket::SocketError error){
-        if(socket) fail(tlsFailure.isEmpty()?"Console connection failed: "+socket->errorString():tlsFailure, error!=QAbstractSocket::SslHandshakeFailedError);
+        if(!socket) return;
+        const auto candidate=consoleCandidate;const auto host=launch.host;const auto port=launch.port;
+        fail(tlsFailure.isEmpty()?"Console connection failed: "+socket->errorString():tlsFailure, error!=QAbstractSocket::SslHandshakeFailedError);
+        if(error==QAbstractSocket::SslHandshakeFailedError && !candidate.isNull())
+            emit consoleCertificateUntrusted(host,port,candidate);
     });
-    auto begin=[this]{tlsFailure.clear(); phase=Phase::Banner; deadline.start(15000); setStatus("Authenticating console…"); process();};
+    auto pinMatches=[this]{
+        return consoleTrust.value("host").toString().compare(launch.host,Qt::CaseInsensitive)==0 &&
+            consoleTrust.value("port").toUInt()==launch.port &&
+            consoleTrust.value("sha256").toString()==QString::fromLatin1(socket->peerCertificate().digest(QCryptographicHash::Sha256).toHex());
+    };
+    auto begin=[this,pinMatches]{
+        if(!consoleTrust.isEmpty() && (!launch.tls || !pinMatches())) {
+            fail("Console certificate or endpoint changed. Connection blocked; review the saved profile's trusted console certificate.");return;
+        }
+        tlsFailure.clear(); phase=Phase::Banner; deadline.start(15000); setStatus("Authenticating console…"); process();};
     connect(socket,&QSslSocket::connected,this,[this,begin]{
         socket->setSocketOption(QAbstractSocket::LowDelayOption,1);
         if(!launch.tls) begin();
@@ -230,7 +244,24 @@ void Session::connectKvm() {
     if(launch.tls) {
         if(!QSslSocket::supportsSsl()) throw Error("No TLS backend available");
         configureClientTls(socket);
-        connect(socket,&QSslSocket::sslErrors,this,[this](const QList<QSslError> &errors){ reportTlsErrors("Console",errors); if(allowUntrusted) socket->ignoreSslErrors(); });
+        connect(socket,&QSslSocket::sslErrors,this,[this,pinMatches](const QList<QSslError> &errors){
+            reportTlsErrors("Console",errors);
+            if(!consoleTrust.isEmpty() && !pinMatches()) {
+                tlsFailure="Console certificate or endpoint changed. Connection blocked; review the saved profile's trusted console certificate.";return;
+            }
+            if(consoleTrust.isEmpty() && allowUntrusted) {socket->ignoreSslErrors();return;}
+            // Explicit pinning permits identity/trust errors, not expiry or invalid signatures.
+            for(const auto &error:errors) {
+                switch(error.error()) {
+                case QSslError::HostNameMismatch: case QSslError::SelfSignedCertificate:
+                case QSslError::SelfSignedCertificateInChain: case QSslError::UnableToGetIssuerCertificate:
+                case QSslError::UnableToGetLocalIssuerCertificate: case QSslError::UnableToVerifyFirstCertificate: break;
+                default: return;
+                }
+            }
+            if(!consoleTrust.isEmpty()) {emit diagnostic("Console TLS: saved certificate fingerprint matched");socket->ignoreSslErrors(errors);}
+            else consoleCandidate=socket->peerCertificate();
+        });
         connect(socket,&QSslSocket::encrypted,this,begin);
         socket->connectToHostEncrypted(launch.host,launch.port);
     } else socket->connectToHost(launch.host,launch.port);
