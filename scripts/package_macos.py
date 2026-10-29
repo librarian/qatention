@@ -1,7 +1,9 @@
 """Package and statically verify a macOS cross-build without running target code."""
 import argparse
+import hashlib
 import os
 from pathlib import Path
+import plistlib
 import re
 import shutil
 import subprocess
@@ -81,8 +83,9 @@ while queue:
 
 # Qt resolves a bundle's Prefix relative to Contents, not Contents/MacOS.
 (resources / 'qt.conf').write_text('[Paths]\nPrefix=.\nPlugins=PlugIns\n')
-# Fallback for the CLI if CoreFoundation does not recognize it as the main bundle.
-(contents / 'MacOS/qt.conf').write_text('[Paths]\nPrefix=..\nPlugins=PlugIns\n')
+# Keep data in Resources: rcodesign 0.29 omits non-Mach-O files under MacOS
+# from the resource seal. The CLI sets its plugin path explicitly instead.
+(contents / 'MacOS/qt.conf').unlink(missing_ok=True)
 if not (plugins / 'platforms/libqcocoa.dylib').is_file():
     raise RuntimeError('Cocoa platform plugin missing')
 if not (plugins / 'tls/libqsecuretransportbackend.dylib').is_file():
@@ -90,6 +93,15 @@ if not (plugins / 'tls/libqsecuretransportbackend.dylib').is_file():
 
 # Use an ad-hoc signature: no Developer ID credentials or notarization implied.
 subprocess.run([str(signer), 'sign', str(bundle)], check=True)
+# Catch unsealed data in the executable directory and a missing/incorrect Qt
+# configuration seal, in addition to checking individual executable hashes.
+for path in (contents / 'MacOS').iterdir():
+    if path not in checked:
+        raise RuntimeError(f'Unexpected non-executable in MacOS: {path}')
+seal = plistlib.loads((contents / '_CodeSignature/CodeResources').read_bytes())
+qt_seal = seal['files2'].get('Resources/qt.conf', {})
+if qt_seal.get('hash2') != hashlib.sha256((resources / 'qt.conf').read_bytes()).digest():
+    raise RuntimeError('Qt configuration missing from bundle resource seal or hash mismatch')
 for binary in sorted(checked):
     verify(binary)
 for link in bundle.rglob('*'):

@@ -36,6 +36,10 @@ static QString passwordPrompt() {
 }
 int main(int argc,char **argv) {
     QCoreApplication app(argc,argv);app.setApplicationName("qatention-capture");app.setApplicationVersion("0.2.0");
+#ifdef Q_OS_MACOS
+    // The secondary executable may not be recognized as the app's main bundle.
+    QCoreApplication::addLibraryPath(QCoreApplication::applicationDirPath()+"/../PlugIns");
+#endif
     QCommandLineParser parser;parser.setApplicationDescription("ATEN console capture and read-only ISO mounting.");parser.addHelpOption();parser.addVersionOption();
     for(const auto &name:{"host","user","output","raw-output","mount-iso","jnlp","vmedia-host","vmedia-port","client-pfx","timeout","web-port"})
         parser.addOption(QCommandLineOption(name,QString("Set %1.").arg(name),"value"));
