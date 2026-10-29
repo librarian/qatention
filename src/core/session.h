@@ -38,6 +38,7 @@ public:
     void setDisplay(int quality,int mode);
     void setAutoReconnect(bool enabled,const QVariantMap &options);
     void setStreaming(bool active,int interval,int fullSeconds);
+    void setDuplicateEndpoint(bool duplicate);
     QString information() const;
     QStringList users() const { return sessionUsers; }
     int hostPower() const { return powerState; }
@@ -69,6 +70,7 @@ private:
     QStringList sessionUsers,userBurst;
     int powerState=-1,quality=11,imageMode=444,fullSeconds=5;
     bool streaming=true;
+    bool duplicateEndpoint=false;
     quint64 videoBytes=0,frames=0;
     quint64 requests=0,fullRequests=0,updates=0,keyEvents=0,pointerEvents=0,rejectedInput=0;
     QElapsedTimer uptime,powerPoll;

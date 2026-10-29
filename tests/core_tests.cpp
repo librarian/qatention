@@ -170,6 +170,19 @@ private slots:
             QTRY_VERIFY_WITH_TIMEOUT((requests+=peer->readAll()).contains(updateRequest({2,2},false)),5000);
             peer->write(frameMessage(hermon(2,2,0x7c00),2,2));QTRY_COMPARE(frames.size(),2);
             QCOMPARE(qvariant_cast<QImage>(frames.last()[0]).pixel(0,0),qRgb(248,0,0));
+            session->setStreaming(true,0,0);
+            QTRY_VERIFY(peer->bytesAvailable()>=10);peer->readAll();
+            session->setDuplicateEndpoint(true);
+            QTRY_VERIFY(peer->bytesAvailable()>=10);
+            QVERIFY(peer->readAll().contains(updateRequest({2,2},false)));
+            peer->write(frameMessage(hermon(2,2,0x1f),2,2));QTRY_COMPARE(frames.size(),3);
+            QTRY_VERIFY(peer->bytesAvailable()>=10);
+            QVERIFY(peer->readAll().contains(updateRequest({2,2},false)));
+            session->setDuplicateEndpoint(false);
+            QTRY_VERIFY(peer->bytesAvailable()>=10);peer->readAll(); // One resync full frame.
+            peer->write(frameMessage(hermon(2,2,0x7c00),2,2));QTRY_COMPARE(frames.size(),4);
+            QTRY_VERIFY(peer->bytesAvailable()>=10);
+            QVERIFY(peer->readAll().contains(updateRequest({2,2},true)));
         }
         QVERIFY(first.connected());QVERIFY(second.connected());
     }

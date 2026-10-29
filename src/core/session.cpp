@@ -330,7 +330,7 @@ void Session::requestFrame() {
     if(!connected() || !streaming) return;
     const bool overdue=pending && frameRequested.isValid() && frameRequested.elapsed()>=10000;
     const bool periodic=fullSeconds>0 && fullFrame.elapsed()>=fullSeconds*1000;
-    const bool full=forceFull || fullSeconds<0 || periodic || overdue;
+    const bool full=forceFull || duplicateEndpoint || fullSeconds<0 || periodic || overdue;
     // Continuous-full mode still waits for replies; explicit/periodic refresh
     // and the watchdog may supersede an outstanding incremental request.
     if(pending && !forceFull && !periodic && !overdue) return;
@@ -379,6 +379,12 @@ void Session::setStreaming(bool active,int interval,int full) {
         emit diagnostic(QString("Streaming: active=%1 intervalMs=%2 fullSeconds=%3 pending=%4").arg(active).arg(interval).arg(full).arg(pending));
     const bool resumed=!streaming && active;streaming=active;frameInterval=qBound(0,interval,1000);fullSeconds=qBound(-1,full,60);
     if(!active) nextFrame.stop();else {if(resumed) forceFull=true;requestFrame();}
+}
+void Session::setDuplicateEndpoint(bool duplicate) {
+    if(duplicateEndpoint==duplicate) return;
+    duplicateEndpoint=duplicate;forceFull=true;
+    emit diagnostic(duplicate?"Duplicate endpoint: using full frames for concurrent sessions":"Duplicate endpoint cleared: restoring configured refresh policy");
+    requestFrame();
 }
 QString Session::information() const {
     const double seconds=uptime.isValid()?uptime.elapsed()/1000.0:0;

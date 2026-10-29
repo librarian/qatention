@@ -80,7 +80,7 @@ MainWindow::Tab *MainWindow::addTab(const QString &name) {
     console->setSession(t->session);sessions.append(t);
     console->setDiagnostics(log->enabled());
     connect(log,&aten::DebugLog::enabledChanged,console,[this,console]{console->setDiagnostics(log->enabled());});
-    connect(t->session,&aten::Session::stateChanged,this,[this,t]{t->console->update();updateTabs();});
+    connect(t->session,&aten::Session::stateChanged,this,[this,t]{t->console->update();applyPreferences();updateTabs();});
     auto diagnostic=[this,t](const QString &s){log->write(QString("[tab %1 | %2] %3").arg(t->id).arg(t->name,s));};
     connect(t->session,&aten::Session::diagnostic,this,diagnostic);
     connect(console,&Console::diagnostic,this,diagnostic);
@@ -122,6 +122,14 @@ void MainWindow::updateTabs() {
 void MainWindow::applyPreferences() {
     if(!actualAction) return;
     for(auto *t:sessions) {
+        const auto endpoint=t->session->mediaEndpoint();
+        bool duplicate=false;
+        if(t->session->connected()) for(auto *other:sessions) {
+            const auto candidate=other->session->mediaEndpoint();
+            if(other!=t && other->session->connected() && endpoint.port==candidate.port &&
+               endpoint.host.compare(candidate.host,Qt::CaseInsensitive)==0) {duplicate=true;break;}
+        }
+        t->session->setDuplicateEndpoint(duplicate);
         t->console->setView(actualAction->isChecked(),smoothAction->isChecked());
         t->session->setStreaming(t==current() || backgroundAction->isChecked(),fps>0?1000/fps:0,fullSeconds);
     }
