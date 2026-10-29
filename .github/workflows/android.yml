@@ -31,6 +31,7 @@ jobs:
           cmake -S . -B build-mobile -G Ninja -DQATENTION_MOBILE=ON
           cmake --build build-mobile --parallel 3
           QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software build-mobile/qatention --smoke-test
+          ctest --test-dir build-mobile --output-on-failure
       - name: Cache Android Qt and OpenSSL
         id: cache
         uses: actions/cache@v5
@@ -63,7 +64,8 @@ jobs:
           qt-android/6.8.3/android_arm64_v8a/bin/qt-cmake -S . -B build-android -G Ninja \
             -DQT_HOST_PATH="$QT_ROOT_DIR" -DANDROID_SDK_ROOT="$ANDROID_HOME" \
             -DANDROID_NDK_ROOT="$ANDROID_HOME/ndk/26.1.10909125" \
-            -DANDROID_OPENSSL_DIR="$PWD/openssl-android" -DCMAKE_BUILD_TYPE=Debug
+            -DANDROID_OPENSSL_DIR="$PWD/openssl-android" -DCMAKE_BUILD_TYPE=Debug \
+            -DQATENTION_ANDROID_VERSION_CODE="$((100 + GITHUB_RUN_NUMBER))"
           cmake --build build-android --target apk --parallel 3
       - name: Verify and stage APK
         run: |
@@ -75,6 +77,25 @@ jobs:
           unzip -l "$apk" | grep 'lib/arm64-v8a/libcrypto_3.so'
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$apk" | grep 'android.permission.INTERNET'
           cp "$apk" dist-android/qatention-android-arm64-preview.apk
+      - name: Sign main builds with persistent identity
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
+          SIGNING_CERT: ${{ secrets.ANDROID_SIGNING_CERT }}
+        run: |
+          set -eu
+          test -n "$SIGNING_KEY" && test -n "$SIGNING_CERT"
+          umask 077
+          signing_dir=$(mktemp -d)
+          trap 'rm -rf "$signing_dir"' EXIT
+          printf '%s' "$SIGNING_KEY" | base64 --decode > "$signing_dir/key.pk8"
+          printf '%s' "$SIGNING_CERT" | base64 --decode > "$signing_dir/cert.pem"
+          apk=dist-android/qatention-android-arm64-preview.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign --key "$signing_dir/key.pk8" --cert "$signing_dir/cert.pem" "$apk"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$apk"
+          expected=$(openssl x509 -in "$signing_dir/cert.pem" -outform DER | sha256sum | cut -d ' ' -f1)
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$apk" | grep -F "certificate SHA-256 digest: $expected"
+          rm -f "$apk.idsig"
       - uses: actions/upload-artifact@v7.0.2
         with:
           path: dist-android/qatention-android-arm64-preview.apk

@@ -255,26 +255,40 @@ Connections start only after an explicit Connect or Reconnect action.
 
 The Android ARM64 preview shares the desktop C++ protocol/decoder core and uses a
 separate Qt Quick Material interface. It supports one connection, live video,
-direct touch-to-pointer input (tap/drag = left mouse), arrow/Esc/Tab/Enter/Backspace
-buttons, Ctrl+Alt+Del, refresh, and a persistent US-layout touch keyboard below
-the video. Character, Shift, symbol, Space, Backspace, and Enter buttons send
-immediately without a separate Send step; the keyboard does not cover the video.
-Logs can be viewed and copied from the Logs dialog. Keyboard input is released
-and video polling paused when the application leaves the foreground.
+direct touch-to-pointer input (tap/drag = left mouse) and a persistent 104-key US
+ANSI keyboard, including function/navigation keys and a numpad. Swipe the keyboard
+horizontally on narrow phones. Ctrl/Alt/Shift/Win latch until tapped again; each
+key sends immediately. Modifiers clear on disconnect or leaving the foreground.
+
+Video initially fits both the width and height of its viewport, preserving its
+aspect ratio. Pinch with two fingers to zoom/pan (up to 8x), or use the +/− buttons.
+**Fit** resets zoom and pan. One-finger gestures continue to control the remote
+mouse. Android system-bar and cutout insets are reserved around the interface.
+Logs can be viewed and copied from the Logs dialog.
 
 Startup shows the connection form without connecting automatically. The preview
-remembers the last host and username, but **does not save passwords**. It supports
-strict HTTPS verification with missing-intermediate recovery and explicit console
-certificate trust, stored per host. It does not yet offer multiple profiles,
-Android Keystore password storage, media mounting, zoom/pan, or background-session
-guarantees. Desktop profiles and UI are unaffected.
+remembers the last host and username. **Save password on this device** defaults on:
+passwords are encrypted with AES-GCM using an app-specific Android Keystore key,
+scoped to hostname and username. No authentication prompt is required; unchecking
+the option and connecting removes that saved password. App backup is disabled.
+It supports strict HTTPS verification with missing-intermediate recovery and
+explicit console certificate trust, stored per host. It does not yet offer
+multiple profiles, media mounting, or background-session guarantees.
+Desktop profiles and UI are unaffected.
 
 The **Android preview** GitHub Actions workflow builds on Ubuntu and publishes
-`qatention-android-arm64-preview.apk`, an installable debug-signed APK for ARM64
+`qatention-android-arm64-preview.apk`, an installable APK for ARM64
 Android 9/API 28 or newer. Download it on your phone and allow installation from
-that download source. Development signing keys may change between CI runners;
-if Android refuses an update because of a signature mismatch, uninstall the old
-preview first (this removes its saved settings and console trust).
+that download source. Main-branch builds use one persistent signing identity stored
+in repository secrets (`ANDROID_SIGNING_KEY`, PKCS#8 DER base64, and
+`ANDROID_SIGNING_CERT`, X.509 PEM base64). CI verifies that identity after signing;
+version codes increase with the workflow run number. Keep a private backup of the
+signing key: losing it prevents updates to existing installations. Pull-request
+builds use disposable debug signing and are not update-compatible with main.
+
+**One final uninstall is required when moving from the early debug-signed previews
+to the persistent signature.** This removes old settings and console trust.
+Subsequent main builds can update in place, retaining passwords and settings.
 
 For the first device test: connect, confirm video changes, tap/drag on the video,
 send text/Enter, and switch away from and back to the app. Use Logs → Copy when

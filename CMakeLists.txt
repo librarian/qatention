@@ -36,7 +36,7 @@ if(ANDROID OR QATENTION_MOBILE)
     qt_add_executable(qatention src/mobile/main.cpp src/mobile/mobile.cpp src/mobile/mobile.h)
     target_link_libraries(qatention PRIVATE qatention_core Qt6::Quick Qt6::QuickControls2)
     qt_add_resources(qatention mobile_licenses PREFIX /licenses FILES LICENSE THIRD_PARTY.md)
-    qt_add_qml_module(qatention URI QatentionMobile VERSION 1.0 QML_FILES src/mobile/Main.qml)
+    qt_add_qml_module(qatention URI QatentionMobile VERSION 1.0 QML_FILES src/mobile/Main.qml src/mobile/AnsiKeys.js)
     if(ANDROID)
         if(NOT EXISTS "${ANDROID_OPENSSL_DIR}/libssl_3.so")
             message(FATAL_ERROR "Set ANDROID_OPENSSL_DIR to the ARM64 OpenSSL library directory")
@@ -44,14 +44,24 @@ if(ANDROID OR QATENTION_MOBILE)
         file(GLOB android_license_files "${ANDROID_OPENSSL_DIR}/*.txt")
         qt_add_resources(qatention android_licenses PREFIX /licenses BASE "${ANDROID_OPENSSL_DIR}" FILES ${android_license_files})
         target_link_options(qatention PRIVATE "-Wl,-z,max-page-size=16384")
+        set(QATENTION_ANDROID_VERSION_CODE 2 CACHE STRING "Android update version")
         set_target_properties(qatention PROPERTIES
+            QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android"
             QT_ANDROID_PACKAGE_NAME org.libc6.qatention
             QT_ANDROID_APP_NAME QATENtion
             QT_ANDROID_MIN_SDK_VERSION 28
             QT_ANDROID_TARGET_SDK_VERSION 35
-            QT_ANDROID_VERSION_CODE 1
-            QT_ANDROID_VERSION_NAME "0.2.0-preview1"
+            QT_ANDROID_VERSION_CODE ${QATENTION_ANDROID_VERSION_CODE}
+            QT_ANDROID_VERSION_NAME "0.2.0-preview2"
             QT_ANDROID_EXTRA_LIBS "${ANDROID_OPENSSL_DIR}/libcrypto_3.so;${ANDROID_OPENSSL_DIR}/libssl_3.so")
+    endif()
+    if(NOT ANDROID)
+        find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
+        enable_testing()
+        qt_add_executable(mobile_tests tests/mobile_tests.cpp src/mobile/mobile.cpp src/mobile/mobile.h)
+        target_link_libraries(mobile_tests PRIVATE qatention_core Qt6::Quick Qt6::Test)
+        add_test(NAME mobile_view COMMAND mobile_tests)
+        set_tests_properties(mobile_view PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     endif()
     return()
 endif()

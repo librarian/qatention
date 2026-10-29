@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Qatention.Native 1.0
+import "AnsiKeys.js" as Ansi
 
 ApplicationWindow {
     id: window
@@ -9,8 +10,10 @@ ApplicationWindow {
     visible: true
     title: "QATENtion"
     header: ToolBar {
-        RowLayout {
-            anchors.fill: parent
+        topPadding: mobile.safeInsets.top
+        leftPadding: mobile.safeInsets.left
+        rightPadding: mobile.safeInsets.right
+        contentItem: RowLayout {
             Label { text: "QATENtion"; font.bold: true; Layout.fillWidth: true; leftPadding: 12 }
             ToolButton {
                 text: connection.busy ? "Disconnect" : "Connect"
@@ -21,14 +24,27 @@ ApplicationWindow {
     }
     ColumnLayout {
         anchors.fill: parent; spacing: 4
+        anchors.leftMargin: mobile.safeInsets.left
+        anchors.rightMargin: mobile.safeInsets.right
+        anchors.bottomMargin: mobile.safeInsets.bottom
         Label { text: connection.status; Layout.fillWidth: true; wrapMode: Text.Wrap; padding: 8 }
         ConsoleVideo {
             id: video
+            clip: true
             session: connection
             Layout.fillWidth: true; Layout.fillHeight: true
+            PinchHandler {
+                id: pinch
+                target: null
+                minimumPointCount: 2
+                rotationAxis.enabled: false
+                onActiveChanged: if (active) video.release()
+                onScaleChanged: delta => video.adjustView(delta, 0, 0)
+                onTranslationChanged: delta => video.adjustView(1, delta.x, delta.y)
+            }
             MouseArea {
                 anchors.fill: parent
-                enabled: connection.connected
+                enabled: connection.connected && !pinch.active
                 onPressed: mouse => video.pointer(mouse.x, mouse.y, true)
                 onPositionChanged: mouse => { if (pressed) video.pointer(mouse.x, mouse.y, true) }
                 onReleased: mouse => video.pointer(mouse.x, mouse.y, false)
@@ -36,55 +52,46 @@ ApplicationWindow {
             }
             Label { anchors.centerIn: parent; visible: !connection.connected; text: "Connect to view the console"; color: "white" }
         }
-        ScrollView {
-            Layout.fillWidth: true; Layout.preferredHeight: 52
-            contentWidth: keys.implicitWidth
-            RowLayout {
-                id: keys
-                enabled: connection.connected
-                Repeater {
-                    model: [{label:"Esc", key:41}, {label:"Tab", key:43}, {label:"↑", key:82}, {label:"↓", key:81}, {label:"←", key:80}, {label:"→", key:79}, {label:"Enter", key:40}, {label:"Backspace", key:42}]
-                    Button { required property var modelData; text: modelData.label; onClicked: mobile.tapKey(modelData.key) }
-                }
-                Button { text: "Ctrl+Alt+Del"; onClicked: connection.ctrlAltDelete() }
-                Button { text: "Refresh"; onClicked: connection.refresh() }
-            }
+        RowLayout {
+            Layout.fillWidth: true
+            Button { text: "Fit"; onClicked: video.fit() }
+            Button { text: "−"; onClicked: video.adjustView(1 / 1.25, 0, 0) }
+            Label { text: Math.round(video.zoom * 100) + "%" }
+            Button { text: "+"; onClicked: video.adjustView(1.25, 0, 0) }
+            Item { Layout.fillWidth: true }
+            Button { text: "Refresh"; onClicked: connection.refresh() }
         }
-        ColumnLayout {
+        Flickable {
             id: keyboard
-            Layout.fillWidth: true; Layout.margins: 4
-            spacing: 2
-            enabled: connection.connected
-            property bool shifted: false
-            property bool symbols: false
-            property var rows: symbols ? ["1234567890", "!@#$%^&*()", "-_=+[]{}", ";:'\"/?,.\\"]
-                                       : ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
+            Layout.fillWidth: true
+            Layout.preferredHeight: 6 * keyHeight + 10
+            property real keyHeight: window.height < 500 ? 28 : 36
+            property real unit: Math.max(34, width / 23)
+            property bool shifted: (mobile.modifiers & 0x22) !== 0
+            contentWidth: 23 * unit
+            contentHeight: height
+            clip: true
+            flickableDirection: Flickable.HorizontalFlick
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AlwaysOn }
             Repeater {
-                model: keyboard.rows
-                RowLayout {
-                    required property string modelData
-                    Layout.fillWidth: true; spacing: 2
-                    Repeater {
-                        model: modelData.split("")
-                        Button {
-                            required property string modelData
-                            Layout.fillWidth: true; Layout.preferredWidth: 1
-                            Layout.preferredHeight: 42
-                            leftPadding: 0; rightPadding: 0
-                            focusPolicy: Qt.NoFocus
-                            text: keyboard.shifted ? modelData.toUpperCase() : modelData
-                            onClicked: { mobile.typeText(text); keyboard.shifted = false }
-                        }
+                model: Ansi.keys
+                Button {
+                    required property var modelData
+                    x: modelData.x * keyboard.unit; y: modelData.y * keyboard.keyHeight
+                    width: modelData.w * keyboard.unit - 2
+                    height: modelData.h * keyboard.keyHeight - 2
+                    enabled: connection.connected
+                    focusPolicy: Qt.NoFocus
+                    leftPadding: 0; rightPadding: 0; topInset: 0; bottomInset: 0
+                    font.pixelSize: modelData.label.length > 3 ? 10 : 13
+                    text: keyboard.shifted && modelData.upper ? modelData.upper : modelData.label
+                    highlighted: modelData.usage >= 224 && (mobile.modifiers & (1 << (modelData.usage - 224))) !== 0
+                    onClicked: {
+                        if (modelData.usage >= 224) mobile.toggleModifier(modelData.usage)
+                        else mobile.tapKey(modelData.usage)
                     }
                 }
-            }
-            RowLayout {
-                Layout.fillWidth: true; spacing: 2
-                Button { text: "Shift"; checkable: true; checked: keyboard.shifted; onClicked: keyboard.shifted = !keyboard.shifted; focusPolicy: Qt.NoFocus }
-                Button { text: keyboard.symbols ? "ABC" : "123"; onClicked: keyboard.symbols = !keyboard.symbols; focusPolicy: Qt.NoFocus }
-                Button { text: "Space"; Layout.fillWidth: true; onClicked: mobile.tapKey(44); focusPolicy: Qt.NoFocus }
-                Button { text: "⌫"; autoRepeat: true; onClicked: mobile.tapKey(42); focusPolicy: Qt.NoFocus }
-                Button { text: "Enter"; onClicked: mobile.tapKey(40); focusPolicy: Qt.NoFocus }
             }
         }
     }
@@ -92,17 +99,18 @@ ApplicationWindow {
         background: Rectangle { color: Material.background; radius: 12 }
         id: connectDialog
         title: "Connect to BMC"
+        onOpened: password.text = mobile.savedPassword(host.text, user.text)
         anchors.centerIn: parent
         width: Math.min(window.width - 24, 440)
         modal: true; standardButtons: Dialog.Ok | Dialog.Cancel
         contentItem: ColumnLayout {
-            TextField { id: host; Layout.fillWidth: true; placeholderText: "BMC hostname or IP"; text: mobile.lastHost; inputMethodHints: Qt.ImhUrlCharactersOnly | Qt.ImhNoAutoUppercase }
-            TextField { id: user; Layout.fillWidth: true; placeholderText: "Username"; text: mobile.lastUser; inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText }
+            TextField { id: host; Layout.fillWidth: true; placeholderText: "BMC hostname or IP"; text: mobile.lastHost; onEditingFinished: password.text = mobile.savedPassword(text, user.text); inputMethodHints: Qt.ImhUrlCharactersOnly | Qt.ImhNoAutoUppercase }
+            TextField { id: user; Layout.fillWidth: true; placeholderText: "Username"; text: mobile.lastUser; onEditingFinished: password.text = mobile.savedPassword(host.text, text); inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText }
             TextField { id: password; Layout.fillWidth: true; placeholderText: "Password"; echoMode: TextInput.Password }
             CheckBox { id: unverified; text: "Allow unverified BMC certificates"; checked: false }
-            Label { text: "Password is not saved in this preview."; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            CheckBox { id: remember; text: "Save password on this device"; checked: true }
         }
-        onAccepted: { mobile.connectTo(host.text,user.text,password.text,unverified.checked);password.clear() }
+        onAccepted: { mobile.connectTo(host.text,user.text,password.text,unverified.checked,remember.checked);password.clear() }
         onRejected: password.clear()
     }
     Dialog {
