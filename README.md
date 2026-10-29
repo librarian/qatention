@@ -256,7 +256,9 @@ Connections start only after an explicit Connect or Reconnect action.
 The Android ARM64 preview shares the desktop C++ protocol/decoder core and uses a
 separate Qt Quick Material interface. It supports one connection, live video,
 direct touch-to-pointer input (tap/drag = left mouse), arrow/Esc/Tab/Enter/Backspace
-buttons, Ctrl+Alt+Del, refresh, and sending up to 256 US-layout ASCII characters.
+buttons, Ctrl+Alt+Del, refresh, and a persistent US-layout touch keyboard below
+the video. Character, Shift, symbol, Space, Backspace, and Enter buttons send
+immediately without a separate Send step; the keyboard does not cover the video.
 Logs can be viewed and copied from the Logs dialog. Keyboard input is released
 and video polling paused when the application leaves the foreground.
 

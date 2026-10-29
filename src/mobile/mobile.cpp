@@ -15,14 +15,6 @@ Mobile::Mobile():log(QStandardPaths::writableLocation(QStandardPaths::AppLocalDa
         pendingTrust={{"host",host},{"port",port},{"sha256",hash}};
         emit trustRequested(host+":"+QString::number(port),hash);
     });
-    typing.setInterval(30);
-    connect(&typing,&QTimer::timeout,this,[this]{
-        if(!session.connected() || queuedText.isEmpty()) {typing.stop();queuedText.clear();return;}
-        bool shift=false;const auto usage=aten::characterUsage(queuedText.front(),shift);queuedText.remove(0,1);
-        if(shift) session.key(0xe1,true);
-        session.key(usage,true);session.key(usage,false);
-        if(shift) session.key(0xe1,false);
-    });
     session.setStreaming(true,50,5);
 }
 QString Mobile::trustKey() const {
@@ -38,7 +30,7 @@ void Mobile::connectTo(const QString &host,const QString &user,const QString &pa
     session.open(options);
 }
 void Mobile::disconnectSession() {
-    typing.stop();queuedText.clear();pendingTrust.clear();session.close();options.clear();
+    pendingTrust.clear();session.close();options.clear();
 }
 void Mobile::trustConsole() {
     if(pendingTrust.isEmpty() || options.isEmpty() || session.busy()) return;
@@ -51,11 +43,18 @@ void Mobile::typeText(const QString &text) {
     if(!session.connected()) return;
     if(text.size()>256) {emit notice("Send at most 256 characters at a time.");return;}
     for(auto c:text) {bool shift=false;if(!aten::characterUsage(c,shift)) {emit notice("This preview supports US-layout ASCII text only.");return;}}
-    queuedText=text;typing.start();
+    // Send in order immediately; do not replace a pending character queue when
+    // another touch arrives, or let Enter/Backspace overtake queued text.
+    for(auto c:text) {
+        bool shift=false;const auto usage=aten::characterUsage(c,shift);
+        if(shift) session.key(0xe1,true);
+        session.key(usage,true);session.key(usage,false);
+        if(shift) session.key(0xe1,false);
+    }
 }
 void Mobile::copyLogs() {QGuiApplication::clipboard()->setText(log.text());}
 void Mobile::background(bool active) {
-    typing.stop();queuedText.clear();session.releaseInput();session.setStreaming(active,50,5);
+    session.releaseInput();session.setStreaming(active,50,5);
 }
 QRectF MobileVideo::imageRect() const {
     QSizeF size=frame.size();size.scale(boundingRect().size(),Qt::KeepAspectRatio);

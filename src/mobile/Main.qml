@@ -50,15 +50,46 @@ ApplicationWindow {
                 Button { text: "Refresh"; onClicked: connection.refresh() }
             }
         }
-        RowLayout {
-            Layout.fillWidth: true; Layout.margins: 6
+        ColumnLayout {
+            id: keyboard
+            Layout.fillWidth: true; Layout.margins: 4
+            spacing: 2
             enabled: connection.connected
-            TextField { id: input; Layout.fillWidth: true; placeholderText: "Text to send (US layout)"; maximumLength: 256; onAccepted: send.clicked() }
-            Button { id: send; text: "Send"; onClicked: {mobile.typeText(input.text);input.clear()} }
+            property bool shifted: false
+            property bool symbols: false
+            property var rows: symbols ? ["1234567890", "!@#$%^&*()", "-_=+[]{}", ";:'\"/?,.\\"]
+                                       : ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
+            Repeater {
+                model: keyboard.rows
+                RowLayout {
+                    required property string modelData
+                    Layout.fillWidth: true; spacing: 2
+                    Repeater {
+                        model: modelData.split("")
+                        Button {
+                            required property string modelData
+                            Layout.fillWidth: true; Layout.preferredWidth: 1
+                            Layout.preferredHeight: 42
+                            leftPadding: 0; rightPadding: 0
+                            focusPolicy: Qt.NoFocus
+                            text: keyboard.shifted ? modelData.toUpperCase() : modelData
+                            onClicked: { mobile.typeText(text); keyboard.shifted = false }
+                        }
+                    }
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true; spacing: 2
+                Button { text: "Shift"; checkable: true; checked: keyboard.shifted; onClicked: keyboard.shifted = !keyboard.shifted; focusPolicy: Qt.NoFocus }
+                Button { text: keyboard.symbols ? "ABC" : "123"; onClicked: keyboard.symbols = !keyboard.symbols; focusPolicy: Qt.NoFocus }
+                Button { text: "Space"; Layout.fillWidth: true; onClicked: mobile.tapKey(44); focusPolicy: Qt.NoFocus }
+                Button { text: "⌫"; autoRepeat: true; onClicked: mobile.tapKey(42); focusPolicy: Qt.NoFocus }
+                Button { text: "Enter"; onClicked: mobile.tapKey(40); focusPolicy: Qt.NoFocus }
+            }
         }
     }
     Dialog {
-        background: Rectangle { color: window.palette.window; radius: 12 }
+        background: Rectangle { color: Material.background; radius: 12 }
         id: connectDialog
         title: "Connect to BMC"
         anchors.centerIn: parent
@@ -75,7 +106,7 @@ ApplicationWindow {
         onRejected: password.clear()
     }
     Dialog {
-        background: Rectangle { color: window.palette.window; radius: 12 }
+        background: Rectangle { color: Material.background; radius: 12 }
         id: trust
         property string endpoint
         property string fingerprint
@@ -91,7 +122,7 @@ ApplicationWindow {
         onRejected: mobile.rejectConsole()
     }
     Dialog {
-        background: Rectangle { color: window.palette.window; radius: 12 }
+        background: Rectangle { color: Material.background; radius: 12 }
         id: logs
         title: "Debug log"
         anchors.centerIn: parent; width: window.width - 24; height: window.height - 80
@@ -109,7 +140,7 @@ ApplicationWindow {
         }
     }
     Dialog {
-        background: Rectangle { color: window.palette.window; radius: 12 }
+        background: Rectangle { color: Material.background; radius: 12 }
         id: message
         property string messageText
         title: "QATENtion"

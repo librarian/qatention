@@ -28,8 +28,6 @@ signals:
 private:
     QSettings settings;
     QVariantMap options,pendingTrust;
-    QTimer typing;
-    QString queuedText;
     QString trustKey() const;
 };
 
