@@ -32,8 +32,16 @@
 MainWindow::MainWindow(aten::Profiles *p,aten::DebugLog *l,bool test):profiles(p),log(l),smoke(test) {
     setWindowTitle("QATENtion");resize(1100,800);setMinimumSize(640,400);
     tabs=new QTabWidget(this);tabs->setTabsClosable(true);tabs->setMovable(true);setCentralWidget(tabs);
-    auto *plus=new QToolButton(tabs);plus->setText("+");plus->setToolTip("New session tab");tabs->setCornerWidget(plus);
+    auto *plus=new QToolButton(tabs);plus->setObjectName("newSessionButton");
+    plus->setText("+ New tab");plus->setAutoRaise(false);
+    plus->setAccessibleName("New session tab");plus->setToolTip("Open a new tab and choose a profile");tabs->setCornerWidget(plus);
     connect(plus,&QToolButton::clicked,this,[this]{addTab();connectionDialog();});
+    connect(tabs,&QTabWidget::tabBarDoubleClicked,this,[this](int index){
+        if(index<0) return;
+        for(auto *t:sessions) if(t->scroll==tabs->widget(index) && t->options.isEmpty()) {
+            tabs->setCurrentIndex(index);connectionDialog();break;
+        }
+    });
     connect(tabs,&QTabWidget::tabCloseRequested,this,&MainWindow::closeTab);
     connect(tabs,&QTabWidget::currentChanged,this,[this]{
         if(auto *t=current()) log->write(QString("[tab %1 | %2] Selected").arg(t->id).arg(t->name));
@@ -111,7 +119,7 @@ void MainWindow::updateTabs() {
     for(auto *t:sessions) {
         const int i=tabs->indexOf(t->scroll);if(i<0) continue;
         tabs->setTabText(i,QString("%1 [%2]").arg(t->name.isEmpty()?"New session":t->name).arg(t->id));
-        tabs->setTabToolTip(i,t->session->status()+"\n"+t->media->status());
+        tabs->setTabToolTip(i,t->options.isEmpty()?"Double-click to choose a profile":t->session->status()+"\n"+t->media->status());
         QPixmap icon(12,12);icon.fill(Qt::transparent);QPainter painter(&icon);painter.setPen(Qt::NoPen);
         painter.setBrush(t->session->connected()?(t->session->hostPower()==0?QColor(Qt::gray):QColor(40,160,70)):QColor(Qt::gray));
         painter.drawEllipse(2,2,8,8);tabs->setTabIcon(i,QIcon(icon));

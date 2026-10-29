@@ -28,5 +28,6 @@ int main(int argc,char **argv) {
             window.connectionDialog();app.quit();
         });
     }
+    if(!smoke) QTimer::singleShot(0,&window,&MainWindow::connectionDialog);
     return app.exec();
 }

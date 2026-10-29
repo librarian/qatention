@@ -14,12 +14,16 @@ private slots:
         const auto menus=window.menuBar()->actions();QCOMPARE(menus.size(),8);
         QStringList expected={"&Power","&Keys","&Mouse","&View","&Connection","&Logging","&Storage","&Help"};
         for(int i=0;i<expected.size();++i) QCOMPARE(menus[i]->text(),expected[i]);
-        auto *plus=tabs->findChild<QToolButton*>();QVERIFY(plus);
+        auto *plus=tabs->findChild<QToolButton*>("newSessionButton");QVERIFY(plus);
         // New-tab opens a modal connection dialog; cancel it without network access.
         QTimer dismiss;dismiss.setInterval(30);
+        bool dialogSeen=false;
         connect(&dismiss,&QTimer::timeout,&window,[&]{
-            if(auto *dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget())) {dialog->reject();dismiss.stop();}
+            if(auto *dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget())) {dialogSeen=true;dialog->reject();dismiss.stop();}
         });
+        dismiss.start();
+        QVERIFY(QMetaObject::invokeMethod(tabs,"tabBarDoubleClicked",Q_ARG(int,0)));
+        QVERIFY(dialogSeen);QCOMPARE(tabs->count(),1); // Configure the existing empty tab.
         dismiss.start();
         plus->click();QCOMPARE(tabs->count(),2);
         QVERIFY(tabs->tabText(0).endsWith("[1]"));QVERIFY(tabs->tabText(1).endsWith("[2]"));

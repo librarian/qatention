@@ -190,3 +190,32 @@ The report compares live and replayed image hashes. Matching hashes establish
 repeatability, not decoder correctness: the captured stream must also be checked
 against the reference decoder and full frames. Reconnect during recording to
 provide a known decoder reset; a trace started mid-session may lack earlier state.
+
+### Cached incremental video on ATEN/ASPEED firmware
+
+On the tested ATEN/ASPEED BMC, incremental video requests can repeatedly return
+an identical cached packet. Fresh screen content then arrives only after a
+full-frame request. A five-second full-refresh interval can therefore produce
+five-second visual updates even while input, packet reception, decoding, and
+painting continue normally. Switching tabs triggers a full refresh and can make
+the screen appear to catch up.
+
+Packet recordings confirmed repeated identical responses between full requests;
+all 835 recorded frames reproduced the live image hashes in both independent
+and interleaved decoder replay. This matches the behavior documented by ATENtion
+and is not specific to macOS rendering. It should not be assumed to affect every
+BMC firmware version.
+
+For affected servers choose **View → Full-frame requests → Continuous**, then use
+**View → Frame rate limit** to control bandwidth and BMC load. QATENtion also
+forces full requests while multiple tabs connect to the same endpoint, restoring
+the configured cadence when only one connection remains. This compatibility
+behavior requests fresh pictures; it does not repair the firmware's incremental
+implementation.
+
+### Opening a connection
+
+Startup opens the profile/connection dialog. Select a saved profile or enter a
+new server. The native **+ New tab** button creates another tab and opens the same
+dialog. If you cancel, double-click the empty **New session** tab to choose a
+profile later. Configured tabs retain their normal selection behavior.
