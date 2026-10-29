@@ -6,10 +6,33 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QFile>
+#include <QTcpServer>
 #include "ui/mainwindow.h"
 class UiTests : public QObject {
     Q_OBJECT
 private slots:
+    void restoredTabsStayDisconnected() {
+        QTemporaryDir dir;
+        const auto format=QSettings::defaultFormat();
+        const auto organization=QCoreApplication::organizationName(), application=QCoreApplication::applicationName();
+        struct Restore {
+            QSettings::Format format;QString organization,application;
+            ~Restore(){QSettings::setDefaultFormat(format);QCoreApplication::setOrganizationName(organization);QCoreApplication::setApplicationName(application);}
+        } restore{format,organization,application};
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,dir.path());
+        QCoreApplication::setOrganizationName("qatention-tests");QCoreApplication::setApplicationName("startup");
+        QSettings settings;settings.setValue("reopenTabs",true);settings.setValue("openTabs",QStringList{"Saved BMC"});settings.sync();
+        QTcpServer server;QVERIFY(server.listen(QHostAddress::LocalHost));
+        aten::Profiles profiles(dir.filePath("profiles.json"));aten::DebugLog log(dir.filePath("log"));
+        QVERIFY(profiles.save("Saved BMC",{{"host","127.0.0.1"},{"webPort",server.serverPort()},{"user","admin"},{"password","test"},{"autoArm",true}}));
+        MainWindow window(&profiles,&log,false);window.show();
+        auto *tabs=window.findChild<QTabWidget*>();QCOMPARE(tabs->count(),1);QVERIFY(tabs->tabText(0).contains("Saved BMC"));
+        QTest::qWait(150);
+        QVERIFY(!server.hasPendingConnections());
+        auto *session=window.findChild<aten::Session*>();QVERIFY(session);QVERIFY(!session->busy());
+        QVERIFY(!window.findChild<QMessageBox*>("consoleCertificateTrustDialog"));
+    }
     void consoleTrustDialogCancel() {
         QTemporaryDir dir;aten::Profiles profiles(dir.filePath("profiles.json"));aten::DebugLog log(dir.filePath("log"));
         MainWindow window(&profiles,&log,true);window.show();

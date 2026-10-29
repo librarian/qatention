@@ -247,3 +247,6 @@ Startup opens the profile/connection dialog. Select a saved profile or enter a
 new server. The native **+ New tab** button creates another tab and opens the same
 dialog. If you cancel, double-click the empty **New session** tab to choose a
 profile later. Configured tabs retain their normal selection behavior.
+
+Startup restores saved tabs disconnected and opens the profile selection dialog.
+Connections start only after an explicit Connect or Reconnect action.

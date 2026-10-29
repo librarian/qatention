@@ -66,7 +66,8 @@ MainWindow::MainWindow(aten::Profiles *p,aten::DebugLog *l,bool test):profiles(p
         for(const auto &name:settings.value("openTabs").toStringList()) {
             for(const auto &entry:entries) if(entry.toMap().value("name").toString()==name) {
                 auto *t=addTab(name);t->options=entry.toMap();t->options["autoReconnect"]=reconnectAction->isChecked();
-                t->session->open(t->options);break;
+                // Restore the workspace, but require an explicit Connect before network activity.
+                break;
             }
         }
         tabs->setCurrentIndex(qBound(0,settings.value("activeTab",0).toInt(),tabs->count()-1));
