@@ -20,6 +20,10 @@ linked into the application, independently of the dynamically linked Qt librarie
 client identity already embedded by ATENtion, from X10 AST2400 firmware 04.07.
 It is not a user's BMC credential. It does not pin or verify the server certificate.
 A client.pfx beside the executable overrides this identity.
+`resources/client-cert.pem` and `resources/client-key.pem` contain the same public
+vendor identity, extracted from that PFX for TLS backends without a PKCS#12
+importer (including Qt SecureTransport). Custom PFX overrides still require a
+backend with PKCS#12 import support.
 
 Qt is dynamically linked. This port uses Qt Core, Gui, Network and Widgets, plus Qt Test for tests. Qt and its bundled dependencies retain
 their own licenses; see https://doc.qt.io/qt-6.8/licensing.html . Development

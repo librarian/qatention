@@ -58,6 +58,22 @@ public:
 class CoreTests : public QObject {
     Q_OBJECT
 private slots:
+    void bundledClientIdentity() {
+        Session session; // Initializes the static certificate resource.
+        QSslSocket socket;
+        configureClientTls(&socket);
+        QVERIFY(!socket.localCertificate().isNull());
+        QVERIFY(!socket.privateKey().isNull());
+        QCOMPARE(socket.protocol(),QSsl::TlsV1_2);
+        // On OpenSSL, compare the portable PEM identity to the original PFX.
+        if(QSslSocket::activeBackend()=="openssl") {
+            QFile pfx(":/resources/client.pfx");QVERIFY(pfx.open(QIODevice::ReadOnly));
+            QSslKey key;QSslCertificate cert;
+            QVERIFY(QSslCertificate::importPkcs12(&pfx,&key,&cert));
+            QVERIFY(socket.localCertificate().toDer()==cert.toDer());
+            QVERIFY(socket.privateKey().toDer()==key.toDer());
+        }
+    }
     void profilesPersistCredentials() {
         QTemporaryDir dir; QVERIFY(dir.isValid()); const auto path=dir.filePath("profiles.json");
         Profiles p(path);

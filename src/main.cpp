@@ -19,9 +19,9 @@ int main(int argc,char **argv) {
     QObject::connect(&log,&aten::DebugLog::enabledChanged,&settings,[&]{if(!smoke) settings.setValue("debugLogging",log.enabled());});
     MainWindow window(&profiles,&log,smoke);window.show();
     if(smoke) {
-        QFile pfx(":/resources/client.pfx");pfx.open(QIODevice::ReadOnly);
-        QSslKey key;QSslCertificate cert;
-        if(!QSslSocket::supportsSsl() || !QSslCertificate::importPkcs12(&pfx,&key,&cert)) return 2;
+        if(!QSslSocket::supportsSsl()) return 2;
+        try { QSslSocket socket;aten::configureClientTls(&socket); }
+        catch(const std::exception &) { return 2; }
         QTimer::singleShot(0,&window,[&]{
             const auto path=qEnvironmentVariable("QATENTION_SMOKE_MAIN_SCREENSHOT");
             if(!path.isEmpty() && !window.grab().save(path)) {app.exit(3);return;}

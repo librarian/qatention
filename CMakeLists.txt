@@ -22,7 +22,8 @@ target_link_libraries(qatention_core PUBLIC Qt6::Core Qt6::Gui Qt6::Network PRIV
 if(WIN32)
     target_link_libraries(qatention_core PRIVATE crypt32)
 endif()
-qt_add_resources(qatention_core vendor_certificate PREFIX / FILES resources/client.pfx)
+qt_add_resources(qatention_core vendor_certificate PREFIX / FILES
+    resources/client.pfx resources/client-cert.pem resources/client-key.pem)
 
 qt_add_executable(qatention-capture src/capture.cpp)
 target_link_libraries(qatention-capture PRIVATE qatention_core)

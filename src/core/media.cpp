@@ -32,10 +32,22 @@ QByteArray mediaAttach(const QString &user,const QString &password,quint32 stamp
 void configureClientTls(QSslSocket *socket) {
     const auto override=QCoreApplication::instance()->property("clientPfx").toString();
     const auto custom=override.isEmpty()?QCoreApplication::applicationDirPath()+"/client.pfx":override;
-    QFile pfx(!override.isEmpty() || QFile::exists(custom)?custom:":/resources/client.pfx");
-    if(!pfx.open(QIODevice::ReadOnly)) throw Error("Cannot open client.pfx");
     QSslKey key;QSslCertificate cert;
-    if(!QSslCertificate::importPkcs12(&pfx,&key,&cert)) throw Error("Cannot load vendor client certificate");
+    if(!override.isEmpty() || QFile::exists(custom)) {
+        QFile pfx(custom);
+        if(!pfx.open(QIODevice::ReadOnly)) throw Error("Cannot open client.pfx");
+        if(!QSslCertificate::importPkcs12(&pfx,&key,&cert))
+            throw Error(("Cannot import custom client.pfx with TLS backend "+QSslSocket::activeBackend()).toStdString());
+    } else {
+        // SecureTransport implements PEM key/certificate loading, but not Qt's
+        // PKCS#12 importer. These are the same public vendor identity as client.pfx.
+        QFile certificate(":/resources/client-cert.pem"),privateKey(":/resources/client-key.pem");
+        if(!certificate.open(QIODevice::ReadOnly) || !privateKey.open(QIODevice::ReadOnly))
+            throw Error("Cannot open bundled vendor client identity");
+        cert=QSslCertificate(&certificate,QSsl::Pem);
+        key=QSslKey(&privateKey,QSsl::Rsa,QSsl::Pem,QSsl::PrivateKey);
+    }
+    if(cert.isNull() || key.isNull()) throw Error("Cannot load vendor client certificate or key");
     socket->setLocalCertificate(cert);socket->setPrivateKey(key);socket->setProtocol(QSsl::TlsV1_2);
 }
 CdRom::CdRom(const QString &path):file(path) {
