@@ -1,0 +1,16 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+  - package-ecosystem: pip
+    directory: /tools
+    schedule:
+      interval: weekly
+    groups:
+      llvm:
+        patterns: ['clang-format', 'clang-tidy']

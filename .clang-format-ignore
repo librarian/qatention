@@ -1,0 +1,3 @@
+# Vendored and generated code is not owned by this project.
+third_party/**
+build*/**

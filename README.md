@@ -309,3 +309,51 @@ cmake -S . -B build-mobile -DQATENTION_MOBILE=ON
 cmake --build build-mobile
 build-mobile/qatention
 ```
+
+## Code style and analysis
+
+First-party C++ (`src/` and `tests/`) follows the
+[NBS clang-format style](https://github.com/ydb-platform/nbs/blob/main/.clang-format),
+with Qt macros and local include groups. Use **clang-format 18.1.8**; vendored
+`third_party/` sources and generated files are excluded. Existing Qt-style names
+are retained. QML, JavaScript and Java are outside the C++ formatting check.
+
+```sh
+python -m pip install -r tools/requirements.txt
+python scripts/check_cpp.py --fix  # apply formatting
+python scripts/check_cpp.py        # check without modifying files
+cmake -S . -B build -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+cmake --build build
+python scripts/check_cpp.py --build build
+```
+
+Repeat configure/build/tidy with `-DQATENTION_MOBILE=ON` in a separate build
+directory to cover the mobile interface. The Code quality workflow does both.
+The NBS-inspired clang-tidy policy checks analyzer findings, bug-prone code,
+performance, portability and selected modernization rules; findings fail CI.
+CodeQL runs security-extended analysis on C++, Python and Actions on pushes,
+pull requests and weekly. Native Windows/macOS/Android-only branches still need
+their platform builds and runtime tests; Linux analysis is not full platform
+coverage. Dependabot proposes weekly Actions and Python-tool updates. Qt,
+OpenSSL and SDK versions remain explicit manual updates in the build workflows
+and scripts.
+
+## Releases
+
+**Prepare draft release** is manual-only and is not triggered by pushes or tags.
+Once Desktop builds, macOS cross-builds, Android preview and Code quality have
+all succeeded for the same `main` push commit, select **Run workflow** on `main`,
+provide its full commit SHA and a tag such as `v0.2.0-preview.3`.
+
+The workflow verifies the source runs, downloads the five existing artifacts,
+checks their original SHA256 digests and creates a **draft** release with
+`SHA256SUMS` and `release-source.json` recording provenance. It never rebuilds or
+re-signs the APK, so Android version codes and the persistent signing identity
+are preserved. Missing/expired artifacts or failed checks stop the release.
+Review and publish the draft explicitly in GitHub Releases after device testing.
+
+This is artifact promotion: release tags do not change embedded application
+versions. Update CMake/application version metadata before building when needed;
+Android remains named `preview` until it is ready for a stable release. macOS
+bundles remain ad-hoc signed, not notarized. Release setup does not itself create
+a tag or release.

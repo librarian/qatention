@@ -47,7 +47,7 @@ jobs:
       - name: Install Windows SDK and build OpenSSL
         if: matrix.target == 'windows-x64' && steps.windows-cache.outputs.cache-hit != 'true'
         run: |
-          python -m pip install aqtinstall==3.3.0
+          python -m pip install -r tools/requirements-build.txt
           python -m aqt install-qt windows desktop 6.8.3 win64_mingw -O qt-windows
           bash scripts/build_windows_openssl.sh "$PWD/openssl-windows" "$RUNNER_TEMP/openssl-build"
       - name: Configure
