@@ -75,8 +75,8 @@ public:
                 if (!data->contains("\r\n\r\n")) {
                     return;
                 }
-                if (data->startsWith("POST") && !data->contains("pwd=password"))
-                {
+                if (data->startsWith("POST") &&
+                    !data->contains("pwd=password")) {
                     return;
                 }
                 QByteArray body, headers;

@@ -142,10 +142,11 @@ private slots:
                 }
             });
         dismiss.start();
-        QVERIFY(QMetaObject::invokeMethod(
-            tabs,
-            "tabBarDoubleClicked",
-            Q_ARG(int, 0)));
+        QVERIFY(
+            QMetaObject::invokeMethod(
+                tabs,
+                "tabBarDoubleClicked",
+                Q_ARG(int, 0)));
         QVERIFY(dialogSeen);
         QCOMPARE(tabs->count(), 1);   // Configure the existing empty tab.
         dismiss.start();
@@ -155,10 +156,11 @@ private slots:
         QVERIFY(tabs->tabText(1).endsWith("[2]"));
         tabs->setCurrentIndex(0);
         QCOMPARE(tabs->currentIndex(), 0);
-        QVERIFY(QMetaObject::invokeMethod(
-            tabs,
-            "tabCloseRequested",
-            Q_ARG(int, 1)));
+        QVERIFY(
+            QMetaObject::invokeMethod(
+                tabs,
+                "tabCloseRequested",
+                Q_ARG(int, 1)));
         QCOMPARE(tabs->count(), 1);
         bool found = false;
         for (auto* a: window.findChildren<QAction*>()) {

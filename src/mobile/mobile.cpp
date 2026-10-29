@@ -18,10 +18,11 @@ QString identity(const QString& host, const QString& user)
     if (name.contains("://")) {
         name = QUrl(name).host();
     }
-    return QString::fromLatin1(QCryptographicHash::hash(
-                                   (name.toLower() + "\n" + user).toUtf8(),
-                                   QCryptographicHash::Sha256)
-                                   .toHex());
+    return QString::fromLatin1(
+        QCryptographicHash::hash(
+            (name.toLower() + "\n" + user).toUtf8(),
+            QCryptographicHash::Sha256)
+            .toHex());
 }
 }   // namespace
 
@@ -372,7 +373,7 @@ void Mobile::toggleModifier(int usage)
     if (!session.connected() || usage < 0xe0 || usage > 0xe7) {
         return;
     }
-    const auto bit = 1 << (usage - 0xe0);
+    const auto bit = 1U << unsigned(usage - 0xe0);
     modifierMask ^= bit;
     emit modifiersChanged();
 }
@@ -383,14 +384,14 @@ void Mobile::tapKey(int usage)
         return;
     }
     for (int i = 0; i < 8; ++i) {
-        if (modifierMask & (1 << i)) {
+        if (modifierMask & (1U << unsigned(i))) {
             session.key(0xe0 + i, true);
         }
     }
     session.key(usage, true);
     session.key(usage, false);
     for (int i = 7; i >= 0; --i) {
-        if (modifierMask & (1 << i)) {
+        if (modifierMask & (1U << unsigned(i))) {
             session.key(0xe0 + i, false);
         }
     }

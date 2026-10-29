@@ -182,19 +182,20 @@ ScsiResult CdRom::execute(const QByteArray& c, quint32 allocation)
             break;
         case 0x5a:
             b = QByteArray::fromHex(
-                (c[2] & 0x3f) == 0x2a || (c[2] & 0x3f) == 0x3f
+                (quint32(quint8(c[2])) & 0x3fU) == 0x2a ||
+                        (quint32(quint8(c[2])) & 0x3fU) == 0x3f
                     ? "00240100000000002a1c3f00717729231b90010000c61b9000100000"
                       "00000010000000000000"
                     : "0006010000000000");
             break;
         case 0x43: {
-            int format = c[2] & 15;
+            auto format = quint32(quint8(c[2])) & 15U;
             if (!format) {
-                format = (c[9] >> 6) & 3;
+                format = (quint32(quint8(c[9])) >> 6U) & 3U;
             }
             const int start = quint8(c[6]);
             const bool single = format == 1, lead = start == 0xaa,
-                       msf = c[1] & 2;
+                       msf = quint32(quint8(c[1])) & 2U;
             if (!single && start > 1 && !lead) {
                 return fail(0x24);
             }
@@ -267,7 +268,8 @@ Media::Media(QObject* parent)
         &deadline,
         &QTimer::timeout,
         this,
-        [this] {
+        [this]
+        {
             stop(
                 phase == Detach ? "Media unmounted"
                                 : "Virtual media timed out");
@@ -402,7 +404,8 @@ void Media::openChannel()
         channel,
         &QSslSocket::disconnected,
         this,
-        [this] {
+        [this]
+        {
             stop(
                 phase == Detach ? "Media unmounted"
                                 : "Virtual media disconnected");
@@ -609,7 +612,8 @@ void Media::consume()
                     [this]
                     {
                         if (phase == Serving && channel &&
-                            !channel->bytesToWrite()) {
+                            !channel->bytesToWrite())
+                        {
                             deadline.stop();
                         }
                     });
@@ -621,13 +625,14 @@ void Media::consume()
                 stop("Media unmounted by BMC");
                 return;
             } else if (command && phase == Serving) {
-                if (body.first(4) != "USBC" || (quint8(body[14]) & 31) == 0 ||
-                    (quint8(body[14]) & 31) > 16)
+                if (body.first(4) != "USBC" ||
+                    (quint32(quint8(body[14])) & 31U) == 0 ||
+                    (quint32(quint8(body[14])) & 31U) > 16)
                 {
                     throw Error("Invalid USB command block");
                 }
                 const auto allocation = le32(body, 8);
-                const bool input = quint8(body[12]) & 0x80;
+                const bool input = quint32(quint8(body[12])) & 0x80U;
                 auto result =
                     cd->execute(body.mid(15, 16), input ? allocation : 0);
                 auto header = [lun](quint32 size, bool status)

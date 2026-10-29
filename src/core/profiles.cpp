@@ -144,9 +144,10 @@ bool Profiles::write(const QVariantList& next)
 #endif
     QSaveFile f(path);
     const auto bytes =
-        QJsonDocument(QJsonObject{
-                          {"version", 1},
-                          {"profiles", QJsonArray::fromVariantList(stored)}})
+        QJsonDocument(
+            QJsonObject{
+                {"version", 1},
+                {"profiles", QJsonArray::fromVariantList(stored)}})
             .toJson();
     if (!f.open(QIODevice::WriteOnly) ||
         !f.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner) ||
