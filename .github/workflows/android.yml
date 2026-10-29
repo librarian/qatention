@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
@@ -34,7 +34,7 @@ jobs:
           ctest --test-dir build-mobile --output-on-failure
       - name: Cache Android Qt and OpenSSL
         id: cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             qt-android
@@ -48,7 +48,7 @@ jobs:
           bash scripts/build_android_openssl.sh openssl-android openssl-work "$ANDROID_HOME/ndk/26.1.10909125"
       - name: Save prepared Android libraries
         if: steps.cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: |
             qt-android

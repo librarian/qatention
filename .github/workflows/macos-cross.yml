@@ -30,7 +30,7 @@ jobs:
           arch: linux_gcc_64
           cache: true
       - name: Cache macOS toolchain and Qt
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         id: mac-cache
         with:
           path: |
@@ -45,14 +45,14 @@ jobs:
           python -m aqt install-qt mac desktop 6.8.3 clang_64 -O qt-macos --archives qtbase qtsvg
       - name: Save prepared SDK cache
         if: steps.mac-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: |
             osxcross
             qt-macos
           key: ubuntu24-osxcross27d21e4-sdk14.5-qt6.8.3-rcodesign0.29-v1
       - name: Cache macOS OpenSSL
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         id: openssl-cache
         with:
           path: openssl-macos
