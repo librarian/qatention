@@ -123,6 +123,8 @@ rejection, invalid protocol and TLS validation failures stop retries. Manual-tok
 connections do not automatically retry. Explicit disconnect unmounts media.
 
 **Logging** enables diagnostics, opens the log panel/file, and clears the log.
+Debug logging starts disabled on every launch on desktop and Android. Enabling it
+applies only to the current app session.
 Credentials and typed keys are excluded. Files rotate at 10 MiB; the panel holds
 64K characters. An unsupported video packet may be captured beside the log and
 contains console pixels. Logs live in the application's local data directory.

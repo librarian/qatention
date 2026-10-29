@@ -1,5 +1,4 @@
 #include <QApplication>
-#include <QSettings>
 #include <QStandardPaths>
 #include <QFile>
 #include <QSslKey>
@@ -13,10 +12,7 @@ int main(int argc,char **argv) {
     QCoreApplication::setApplicationVersion("0.2.0");
     const bool smoke=app.arguments().contains("--smoke-test");
     aten::Profiles profiles(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)+"/profiles.json");
-    QSettings settings;
     aten::DebugLog log(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)+"/logs/qatention.log");
-    if(!smoke) log.setEnabled(settings.value("debugLogging",false).toBool());
-    QObject::connect(&log,&aten::DebugLog::enabledChanged,&settings,[&]{if(!smoke) settings.setValue("debugLogging",log.enabled());});
     MainWindow window(&profiles,&log,smoke);window.show();
     if(smoke) {
         if(!QSslSocket::supportsSsl()) return 2;

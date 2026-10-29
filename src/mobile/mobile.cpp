@@ -31,7 +31,6 @@ Mobile::Mobile():log(QStandardPaths::writableLocation(QStandardPaths::AppLocalDa
     insetTimer.start();
 #endif
     connect(&session,&aten::Session::stateChanged,this,[this]{if(!session.connected()) releaseModifiers();});
-    log.setEnabled(true);
     connect(&session,&aten::Session::diagnostic,&log,&aten::DebugLog::write);
     connect(&session,&aten::Session::consoleCertificateUntrusted,this,[this](const QString &host,quint16 port,const QSslCertificate &cert){
         const auto hash=QString::fromLatin1(cert.digest(QCryptographicHash::Sha256).toHex());
