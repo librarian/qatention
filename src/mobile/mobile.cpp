@@ -59,6 +59,14 @@ void Mobile::connectTo(const QString &host,const QString &user,const QString &pa
 #else
     Q_UNUSED(remember);
 #endif
+    auto entries=profiles();
+    const auto idKey=identity(normalized,user);
+    const QVariantMap profile{{"id",idKey},{"host",normalized},{"user",user},
+        {"label",normalized+" — "+user},{"remember",remember},{"unverified",unverified}};
+    bool replaced=false;
+    for(auto &entry:entries) if(entry.toMap().value("id")==idKey) {entry=profile;replaced=true;break;}
+    if(!replaced) entries.append(profile);
+    settings.setValue("mobileProfiles",entries);settings.sync();emit profilesChanged();
     session.open(options);
 }
 void Mobile::disconnectSession() {
@@ -69,6 +77,19 @@ void Mobile::trustConsole() {
     settings.setValue(trustKey(),pendingTrust);settings.sync();
     if(settings.status()!=QSettings::NoError) {emit notice("Cannot save console certificate trust.");return;}
     options["consoleTrust"]=pendingTrust;pendingTrust.clear();session.open(options);
+}
+void Mobile::removeProfile(const QString &host,const QString &user) {
+    const auto idKey=identity(host,user);
+#ifdef Q_OS_ANDROID
+    const auto id=QJniObject::fromString(idKey),empty=QJniObject::fromString(QString());
+    if(!QJniObject::callStaticMethod<jboolean>("org/libc6/qatention/MainActivity","savePassword",
+        "(Ljava/lang/String;Ljava/lang/String;)Z",id.object<jstring>(),empty.object<jstring>())) {
+        emit notice("Could not remove the saved password.");return;
+    }
+#endif
+    auto entries=profiles();
+    for(qsizetype i=entries.size();i>0;--i) if(entries[i-1].toMap().value("id")==idKey) entries.removeAt(i-1);
+    settings.setValue("mobileProfiles",entries);settings.sync();emit profilesChanged();
 }
 QString Mobile::savedPassword(const QString &host,const QString &user) {
 #ifdef Q_OS_ANDROID
@@ -119,7 +140,7 @@ void MobileVideo::setSession(aten::Session *s) {
     if(connection==s) return;
     release();if(connection) disconnect(connection,nullptr,this,nullptr);connection=s;frame={};
     if(s) {
-        connect(s,&aten::Session::frameReady,this,[this](const QImage &image){if(frame.size()!=image.size()) fit();frame=image;constrainPan();update();});
+        connect(s,&aten::Session::frameReady,this,[this](const QImage &image){const bool resized=frame.size()!=image.size();if(resized) fit();frame=image;if(resized) emit frameSizeChanged();constrainPan();update();});
         connect(s,&aten::Session::clearFrame,this,[this]{frame={};update();});
     }
     update();emit sessionChanged();

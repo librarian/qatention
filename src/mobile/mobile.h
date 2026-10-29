@@ -9,10 +9,13 @@ class Mobile : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantMap safeInsets READ safeInsets NOTIFY safeInsetsChanged)
     Q_PROPERTY(int modifiers READ modifiers NOTIFY modifiersChanged)
+    Q_PROPERTY(QVariantList profiles READ profiles NOTIFY profilesChanged)
     Q_PROPERTY(QString lastHost READ lastHost CONSTANT)
     Q_PROPERTY(QString lastUser READ lastUser CONSTANT)
 public:
     Mobile();
+    QVariantList profiles() const {return settings.value("mobileProfiles").toList();}
+    Q_INVOKABLE void removeProfile(const QString &host,const QString &user);
     QVariantMap safeInsets() const {return {{"left",insets.left()},{"top",insets.top()},{"right",insets.right()},{"bottom",insets.bottom()}};}
     int modifiers() const {return modifierMask;}
     Q_INVOKABLE void toggleModifier(int usage);
@@ -30,6 +33,7 @@ public:
     Q_INVOKABLE void copyLogs();
     void background(bool active);
 signals:
+    void profilesChanged();
     void safeInsetsChanged();
     void modifiersChanged();
     void trustRequested(const QString &endpoint,const QString &fingerprint);
@@ -46,6 +50,7 @@ private:
 
 class MobileVideo : public QQuickPaintedItem {
     Q_OBJECT
+    Q_PROPERTY(QSize frameSize READ frameSize NOTIFY frameSizeChanged)
     Q_PROPERTY(qreal zoom READ zoom NOTIFY zoomChanged)
     Q_PROPERTY(aten::Session* session READ session WRITE setSession NOTIFY sessionChanged)
 public:
@@ -53,6 +58,7 @@ public:
     aten::Session *session() const {return connection;}
     void setSession(aten::Session *session);
     void paint(QPainter *painter) override;
+    QSize frameSize() const {return frame.isNull()?QSize(640,480):frame.size();}
     qreal zoom() const {return magnification;}
     Q_INVOKABLE void fit();
     Q_INVOKABLE void adjustView(qreal scale,qreal dx,qreal dy);
@@ -62,6 +68,7 @@ public:
 signals:
     void sessionChanged();
     void zoomChanged();
+    void frameSizeChanged();
 private:
     QPointer<aten::Session> connection;
     QImage frame;

@@ -255,25 +255,27 @@ Connections start only after an explicit Connect or Reconnect action.
 
 The Android ARM64 preview shares the desktop C++ protocol/decoder core and uses a
 separate Qt Quick Material interface. It supports one connection, live video,
-direct touch-to-pointer input (tap/drag = left mouse) and a persistent 104-key US
-ANSI keyboard, including function/navigation keys and a numpad. Swipe the keyboard
-horizontally on narrow phones. Ctrl/Alt/Shift/Win latch until tapped again; each
+tap-to-click input and a persistent US ANSI keyboard whose main section fits the
+screen width. **Fn** opens the navigation keys; **Num** opens the numpad. Tap the
+same layer button again to return to the main keyboard. Ctrl/Alt/Shift/Win latch until tapped again; each
 key sends immediately. Modifiers clear on disconnect or leaving the foreground.
 
 Video initially fits both the width and height of its viewport, preserving its
-aspect ratio. Pinch with two fingers to zoom/pan (up to 8x), or use the +/− buttons.
-**Fit** resets zoom and pan. One-finger gestures continue to control the remote
-mouse. Android system-bar and cutout insets are reserved around the interface.
+aspect ratio. Pinch to zoom (up to 8x) and drag to pan/scroll, or use the +/− buttons.
+**Fit** resets zoom and pan. Taps click the remote console. Enable **Drag** when you need to drag the remote
+mouse instead of panning the view. Android system-bar and cutout insets are reserved around the interface.
 Logs can be viewed and copied from the Logs dialog.
 
 Startup shows the connection form without connecting automatically. The preview
-remembers the last host and username. **Save password on this device** defaults on:
+offers multiple saved profiles, selected by hostname and username, with **New**
+and **Delete** controls. Connecting creates or updates the selected host/user
+profile without affecting other profiles. It also remembers the last host and username. **Save password on this device** defaults on:
 passwords are encrypted with AES-GCM using an app-specific Android Keystore key,
 scoped to hostname and username. No authentication prompt is required; unchecking
 the option and connecting removes that saved password. App backup is disabled.
 It supports strict HTTPS verification with missing-intermediate recovery and
 explicit console certificate trust, stored per host. It does not yet offer
-multiple profiles, media mounting, or background-session guarantees.
+media mounting or background-session guarantees.
 Desktop profiles and UI are unaffected.
 
 The **Android preview** GitHub Actions workflow builds on Ubuntu and publishes
