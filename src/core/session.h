@@ -63,7 +63,7 @@ private:
     QVariantMap reconnectOptions;
     bool established=false;
     int retryCount=0;
-    QElapsedTimer received, fullFrame;
+    QElapsedTimer received, fullFrame, frameRequested;
     QByteArray buffer;
     Launch launch,mediaLaunch;
     QStringList sessionUsers,userBurst;

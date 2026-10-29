@@ -146,6 +146,33 @@ private slots:
         QVERIFY(!first.decode(end,0x57));
         auto bad=white;bad[0]=12;QVERIFY_EXCEPTION_THROWN(first.decode(bad,0x57),Error);
     }
+    void concurrentSessionsRecoverStalledVideo() {
+        QTcpServer server;QVERIFY(server.listen(QHostAddress::LocalHost));
+        Session first,second;
+        for(auto *session:{&first,&second}) {
+            session->setStreaming(true,0,1);
+            session->open({{"host","127.0.0.1"},{"user","u"},{"password","p"},{"autoArm",false},{"tls",false},{"port",server.serverPort()}});
+            QTRY_VERIFY(server.hasPendingConnections());auto *peer=server.nextPendingConnection();
+            peer->write("RFB 003.008\n");QTRY_VERIFY(peer->bytesAvailable()>=12);peer->readAll();
+            peer->write(QByteArray::fromHex("0110"));QTRY_VERIFY(peer->bytesAvailable()>=1);peer->readAll();
+            peer->write(QByteArray(24,0));QTRY_VERIFY(peer->bytesAvailable()>=48);peer->readAll();
+            peer->write(QByteArray(4,0));QTRY_VERIFY(peer->bytesAvailable()>=1);peer->readAll();
+            QByteArray init(36,0);put16(init,0,2);put16(init,2,2);peer->write(init);
+            QTRY_VERIFY(session->connected());QTRY_VERIFY(peer->bytesAvailable()>=22);peer->readAll();
+            QSignalSpy frames(session,&Session::frameReady);
+            peer->write(frameMessage(hermon(2,2,0x1f),2,2));QTRY_COMPARE(frames.size(),1);
+            QTRY_VERIFY(peer->bytesAvailable()>=10);
+            QVERIFY(peer->readAll().contains(updateRequest({2,2},true)));
+            // Withhold the incremental reply but keep sending valid power replies.
+            QTimer replies;replies.setInterval(100);
+            connect(&replies,&QTimer::timeout,peer,[peer]{peer->write(QByteArray::fromHex("37000000"));});
+            replies.start();QByteArray requests;
+            QTRY_VERIFY_WITH_TIMEOUT((requests+=peer->readAll()).contains(updateRequest({2,2},false)),5000);
+            peer->write(frameMessage(hermon(2,2,0x7c00),2,2));QTRY_COMPARE(frames.size(),2);
+            QCOMPARE(qvariant_cast<QImage>(frames.last()[0]).pixel(0,0),qRgb(248,0,0));
+        }
+        QVERIFY(first.connected());QVERIFY(second.connected());
+    }
     void fragmentedSession() {
         QTcpServer server;QVERIFY(server.listen(QHostAddress::LocalHost));
         Session s;QSignalSpy frames(&s,&Session::frameReady);

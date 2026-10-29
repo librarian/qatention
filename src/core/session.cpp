@@ -29,8 +29,9 @@ Session::Session(QObject *parent):QObject(parent) {
         if(received.elapsed()>60000) { fail("BMC stopped responding",true); return; }
         send(QByteArray::fromHex("150000000100000000"));
         if(powerPoll.elapsed()>=10000) {send(QByteArray(1,0x37));powerPoll.restart();}
-        if(received.elapsed()>10000) {pending=false;forceFull=true;}
-        if(!pending) requestFrame();
+        // Other replies can keep the connection alive while an incremental video
+        // request remains unanswered. Check the video deadline independently.
+        requestFrame();
     });
 }
 void Session::reportTlsErrors(const QString &endpoint,const QList<QSslError> &errors) {
@@ -323,9 +324,15 @@ bool Session::consumeMessage() {
     buffer.remove(0,length); return true;
 }
 void Session::requestFrame() {
-    if(!connected() || pending || !streaming) return;
-    const bool full=forceFull || fullSeconds<0 || (fullSeconds>0 && fullFrame.elapsed()>=fullSeconds*1000);
+    if(!connected() || !streaming) return;
+    const bool overdue=pending && frameRequested.isValid() && frameRequested.elapsed()>=10000;
+    const bool periodic=fullSeconds>0 && fullFrame.elapsed()>=fullSeconds*1000;
+    const bool full=forceFull || fullSeconds<0 || periodic || overdue;
+    // Continuous-full mode still waits for replies; explicit/periodic refresh
+    // and the watchdog may supersede an outstanding incremental request.
+    if(pending && !forceFull && !periodic && !overdue) return;
     forceFull=false; pending=true;
+    frameRequested.restart();
     send(updateRequest(decoder->image().size(),!full));
     if(full) fullFrame.restart();
 }
