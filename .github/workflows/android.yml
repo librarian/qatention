@@ -18,7 +18,7 @@ jobs:
           distribution: temurin
           java-version: '17'
       - name: Build dependencies
-        run: sudo apt-get update && sudo apt-get install -y ninja-build patchelf libgl1-mesa-dev libxkbcommon-dev
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev libxkbcommon-dev
       - name: Android SDK
         run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" "ndk;26.1.10909125"'
       - uses: jurplel/install-qt-action@v4
@@ -38,7 +38,7 @@ jobs:
           path: |
             qt-android
             openssl-android
-          key: android-arm64-qt6.8.3-ndk26.1-openssl3.5.9-v1
+          key: android-arm64-qt6.8.3-ndk26.1-openssl3.5.9-v2
       - name: Prepare Android libraries
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
@@ -52,7 +52,7 @@ jobs:
           path: |
             qt-android
             openssl-android
-          key: android-arm64-qt6.8.3-ndk26.1-openssl3.5.9-v1
+          key: android-arm64-qt6.8.3-ndk26.1-openssl3.5.9-v2
       - name: Include Qt licenses
         run: |
           for name in LGPL-3.0-only GPL-3.0-only; do
@@ -70,6 +70,7 @@ jobs:
           mkdir -p dist-android
           apk=build-android/android-build/build/outputs/apk/debug/android-build-debug.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "$apk"
+          python3 scripts/verify_android_elf.py "$apk"
           unzip -l "$apk" | grep 'lib/arm64-v8a/libssl_3.so'
           unzip -l "$apk" | grep 'lib/arm64-v8a/libcrypto_3.so'
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$apk" | grep 'android.permission.INTERNET'
