@@ -460,7 +460,7 @@ void MainWindow::makeMenus()
     auto action = [this](
                       QMenu* menu,
                       const QString& name,
-                      std::function<void()> callback,
+                      const std::function<void()>& callback,
                       bool online = false)
     {
         auto* a = menu->addAction(name);
@@ -641,8 +641,9 @@ void MainWindow::makeMenus()
                      QMenu* menu,
                      const QList<QPair<QString, int>>& items,
                      int currentValue,
-                     std::function<void(int)> apply)
+                     const std::function<void(int)>& apply)
     {
+        // QObject parent ownership: the menu deletes this group.
         auto* group = new QActionGroup(menu);
         for (const auto& item: items) {
             auto* a = menu->addAction(item.first);
@@ -655,7 +656,7 @@ void MainWindow::makeMenus()
                 this,
                 [apply, item] { apply(item.second); });
         }
-    };
+    };   // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
     radio(
         view->addMenu("Full-frame requests"),
         {{"Continuous", -1},

@@ -558,10 +558,12 @@ private slots:
                 [peer] { peer->write(QByteArray::fromHex("37000000")); });
             replies.start();
             QByteArray requests;
-            QTRY_VERIFY_WITH_TIMEOUT(
-                (requests += peer->readAll())
-                    .contains(updateRequest({2, 2}, false)),
-                5000);
+            const auto receivedFullRequest = [&]
+            {
+                requests += peer->readAll();
+                return requests.contains(updateRequest({2, 2}, false));
+            };
+            QTRY_VERIFY_WITH_TIMEOUT(receivedFullRequest(), 5000);
             peer->write(frameMessage(hermon(2, 2, 0x7c00), 2, 2));
             QTRY_COMPARE(frames.size(), 2);
             QCOMPARE(

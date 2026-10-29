@@ -28,25 +28,25 @@ jobs:
       RELEASE_TAG: ${{ inputs.tag }}
       RELEASE_SHA: ${{ inputs.commit }}
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Require successful builds and analysis at the exact commit
         id: source
         run: python scripts/prepare_release.py prepare
-      - uses: actions/download-artifact@v8.0.2
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           github-token: ${{ github.token }}
           run-id: ${{ steps.source.outputs.desktop }}
           path: release-assets
           merge-multiple: true
           skip-decompress: true
-      - uses: actions/download-artifact@v8.0.2
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           github-token: ${{ github.token }}
           run-id: ${{ steps.source.outputs.macos }}
           path: release-assets
           merge-multiple: true
           skip-decompress: true
-      - uses: actions/download-artifact@v8.0.2
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           github-token: ${{ github.token }}
           run-id: ${{ steps.source.outputs.android }}
