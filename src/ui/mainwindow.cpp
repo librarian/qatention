@@ -23,6 +23,8 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QDesktopServices>
+#include <QDir>
+#include <QUuid>
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QPainter>
@@ -84,6 +86,8 @@ MainWindow::Tab *MainWindow::addTab(const QString &name) {
     auto diagnostic=[this,t](const QString &s){log->write(QString("[tab %1 | %2] %3").arg(t->id).arg(t->name,s));};
     connect(t->session,&aten::Session::diagnostic,this,diagnostic);
     connect(console,&Console::diagnostic,this,diagnostic);
+    if(!traceFolder.isEmpty() && !t->session->startVideoTrace(traceFolder+QString("/tab-%1.jsonl").arg(t->id)))
+        diagnostic("Cannot start video trace");
     connect(t->session,&aten::Session::unsupportedFrame,log,&aten::DebugLog::capture);
     connect(t->media,&aten::Media::diagnostic,this,diagnostic);
     connect(t->media,&aten::Media::changed,this,[this,t]{t->session->setKeepMedia(t->media->busy());updateTabs();});
@@ -129,7 +133,7 @@ void MainWindow::applyPreferences() {
             if(other!=t && other->session->connected() && endpoint.port==candidate.port &&
                endpoint.host.compare(candidate.host,Qt::CaseInsensitive)==0) {duplicate=true;break;}
         }
-        t->session->setDuplicateEndpoint(duplicate);
+        t->session->setDuplicateEndpoint(duplicate && traceFolder.isEmpty());
         t->console->setView(actualAction->isChecked(),smoothAction->isChecked());
         t->session->setStreaming(t==current() || backgroundAction->isChecked(),fps>0?1000/fps:0,fullSeconds);
     }
@@ -199,6 +203,24 @@ void MainWindow::makeMenus() {
         auto update=[label,session]{label->setText(session?session->information():"Session closed");};update();connect(timer,&QTimer::timeout,dialog,update);timer->start(1000);dialog->show();
     });
     auto *logging=menuBar()->addMenu("&Logging");
+    action(logging,"Record video trace for 60 seconds…",[this]{
+        if(!traceFolder.isEmpty()) return;
+        const auto parent=QFileDialog::getExistingDirectory(this,"Save video traces (contain screen content)");
+        if(parent.isEmpty()) return;
+        const auto folder=parent+"/qatention-trace-"+QUuid::createUuid().toString(QUuid::WithoutBraces);
+        if(!QDir().mkpath(folder)) {QMessageBox::warning(this,"Trace","Cannot create trace folder");return;}
+        traceFolder=folder;log->setEnabled(true);
+        for(auto *t:sessions) if(!t->session->startVideoTrace(folder+QString("/tab-%1.jsonl").arg(t->id)))
+            log->write(QString("Cannot start trace for tab %1").arg(t->id));
+        log->write("Video trace active for 60 seconds; duplicate-endpoint workaround temporarily disabled. Reconnect both tabs before reproducing.");
+        applyPreferences();
+        QTimer::singleShot(60000,this,[this,folder]{
+            for(auto *t:sessions) t->session->stopVideoTrace();
+            traceFolder.clear();applyPreferences();
+            QFile summary(folder+"/diagnostic.log");if(summary.open(QIODevice::WriteOnly)) {summary.setPermissions(QFileDevice::ReadOwner|QFileDevice::WriteOwner);summary.write(log->text().toUtf8());}
+            log->write("Video trace saved: "+folder);
+        });
+    });
     auto *enabled=logging->addAction("Enable debug logging");enabled->setCheckable(true);enabled->setChecked(log->enabled());
     connect(enabled,&QAction::toggled,log,&aten::DebugLog::setEnabled);
     logging->addAction(logDock->toggleViewAction());

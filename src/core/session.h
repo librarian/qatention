@@ -1,6 +1,7 @@
 #pragma once
 #include "decoder.h"
 #include "protocol.h"
+#include "videotrace.h"
 #include <QObject>
 #include <QNetworkAccessManager>
 #include <QPointer>
@@ -39,6 +40,8 @@ public:
     void setAutoReconnect(bool enabled,const QVariantMap &options);
     void setStreaming(bool active,int interval,int fullSeconds);
     void setDuplicateEndpoint(bool duplicate);
+    bool startVideoTrace(const QString &path);
+    void stopVideoTrace();
     QString information() const;
     QStringList users() const { return sessionUsers; }
     int hostPower() const { return powerState; }
@@ -52,6 +55,7 @@ signals:
     void frameReady(const QImage &image);
     void clearFrame();
 private:
+    VideoTrace videoTrace;
     enum class Phase { Idle, Reconnecting, Web, Connecting, Banner, Security, Challenge, Auth, Init, Messages };
     bool keepMedia=false;
     QList<std::function<void()>> deferredLogouts;

@@ -16,7 +16,8 @@ add_library(qatention_core STATIC
     src/core/session.cpp src/core/session.h
     src/core/profiles.cpp src/core/profiles.h
     src/core/debuglog.cpp src/core/debuglog.h
-    src/core/media.cpp src/core/media.h)
+    src/core/media.cpp src/core/media.h
+    src/core/videotrace.cpp src/core/videotrace.h)
 target_include_directories(qatention_core PUBLIC src)
 target_link_libraries(qatention_core PUBLIC Qt6::Core Qt6::Gui Qt6::Network PRIVATE aspeed)
 if(WIN32)

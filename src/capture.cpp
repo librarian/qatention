@@ -41,12 +41,15 @@ int main(int argc,char **argv) {
     QCoreApplication::addLibraryPath(QCoreApplication::applicationDirPath()+"/../PlugIns");
 #endif
     QCommandLineParser parser;parser.setApplicationDescription("ATEN console capture and read-only ISO mounting.");parser.addHelpOption();parser.addVersionOption();
-    for(const auto &name:{"host","user","output","raw-output","mount-iso","jnlp","vmedia-host","vmedia-port","client-pfx","timeout","web-port"})
+    for(const auto &name:{"host","user","output","raw-output","mount-iso","jnlp","vmedia-host","vmedia-port","client-pfx","timeout","web-port","replay-video"})
         parser.addOption(QCommandLineOption(name,QString("Set %1.").arg(name),"value"));
     for(const auto &name:{"http","vmedia-plain","check-native-decoder","verify-cert"})
         parser.addOption(QCommandLineOption(name,QString("Enable %1.").arg(name)));
     parser.process(app);
     try {
+        if(parser.isSet("replay-video")) {
+            std::cout<<aten::replayVideoTrace(parser.value("replay-video"),parser.value("output")).toStdString()<<"\n";return 0;
+        }
         if(parser.isSet("check-native-decoder")) {
             aten::Decoder decoder;decoder.resize({8,8});
             if(!decoder.decode(QByteArray::fromHex("000001bc0000205300000000"),0x57) || decoder.image().pixel(0,0)!=qRgb(255,255,255)) throw aten::Error("Native decoder check failed");

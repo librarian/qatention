@@ -165,3 +165,28 @@ The CLI is inside qatention.app/Contents/MacOS/qatention-capture.
 CI checks architectures, bundled library dependencies, signature code-page hashes and symlinks;
 it cannot run the macOS application. Login, TLS, video, input and media need testing
 on a Mac. macOS currently stores profile credentials in owner-readable JSON.
+
+### Investigating incremental video
+
+Choose **Logging → Record video trace for 60 seconds…** and select a folder.
+Reconnect both tabs after recording starts, reproduce the stale display, then
+switch away and back. Keep the app open until the log reports that recording
+has stopped. ZIP the new `qatention-trace-*` directory for analysis.
+
+Each tab has a separate JSONL recording capped at 64 MiB, containing compressed
+screen pixels, decoded-image hashes, request types, timestamps, and input counts.
+These files contain screen content; use a non-sensitive console screen. They do
+not record web authentication or key values. The duplicate-endpoint full-frame
+workaround is disabled during recording and restored afterward; the selected
+full-frame cadence is retained (use Every 5 seconds to investigate incrementals).
+
+Replay a recording without connecting to a BMC:
+
+```sh
+qatention-capture --replay-video tab-1.jsonl --output last-frame.png
+```
+
+The report compares live and replayed image hashes. Matching hashes establish
+repeatability, not decoder correctness: the captured stream must also be checked
+against the reference decoder and full frames. Reconnect during recording to
+provide a known decoder reset; a trace started mid-session may lack earlier state.

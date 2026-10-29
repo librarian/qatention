@@ -28,6 +28,7 @@ Session::Session(QObject *parent):QObject(parent) {
         if(!connected()) return;
         emit diagnostic(QString("Pipeline: requests=%1 full=%2 replies=%3 decoded=%4 pending=%5 streaming=%6 keys=%7 pointers=%8 rejectedInput=%9")
             .arg(requests).arg(fullRequests).arg(updates).arg(frames).arg(pending).arg(streaming).arg(keyEvents).arg(pointerEvents).arg(rejectedInput));
+        if(videoTrace.active()) videoTrace.record({{"type","input-counts"},{"keys",double(keyEvents)},{"pointers",double(pointerEvents)}});
         if(received.elapsed()>60000) { fail("BMC stopped responding",true); return; }
         send(QByteArray::fromHex("150000000100000000"));
         if(powerPoll.elapsed()>=10000) {send(QByteArray(1,0x37));powerPoll.restart();}
@@ -78,6 +79,7 @@ void Session::resetTransport() {
     web.setCookieJar(new QNetworkCookieJar(&web));
     tlsFailure.clear();
     buffer.clear(); launch={}; decoder.reset(); pending=false; forceFull=false; controlling=true;
+    if(videoTrace.active()) videoTrace.record({{"type","reset"}});
     requests=fullRequests=updates=keyEvents=pointerEvents=rejectedInput=0;
     phase=Phase::Idle; emit clearFrame(); setStatus("Disconnected");
 }
@@ -281,7 +283,16 @@ bool Session::consumeMessage() {
             if(!n) noSignal|=w>=0x8000 || h>=0x8000;
             else {
                 if(x==0 && y==0 && decoder->image().size()!=QSize(w,h)) { decoder->resize({w,h}); forceFull=true; }
-                try {emit videoPacket(buffer.mid(pos+20,n),encoding);if(!decoder) return false; changed|=decoder->decode(buffer.mid(pos+20,n),encoding); }
+                try {
+                    const auto packet=buffer.mid(pos+20,n);
+                    emit videoPacket(packet,encoding);if(!decoder) return false;
+                    const bool decoded=decoder->decode(packet,encoding);changed|=decoded;
+                    if(videoTrace.active() && !videoTrace.record({{"type","video"},{"width",decoder->image().width()},
+                        {"height",decoder->image().height()},{"x",x},{"y",y},{"encoding",double(encoding)},
+                        {"payload",QString::fromLatin1(packet.toBase64())},{"changed",decoded},
+                        {"imageSha256",QString::fromLatin1(imageHash(decoder->image()))}}))
+                        emit diagnostic("Video trace stopped: size limit or write error");
+                }
                 catch(...) { emit unsupportedFrame(buffer.mid(pos+20,n)); throw; }
             }
             pos+=20+n;
@@ -336,6 +347,7 @@ void Session::requestFrame() {
     if(pending && !forceFull && !periodic && !overdue) return;
     forceFull=false; pending=true;
     ++requests;if(full) ++fullRequests;
+    if(videoTrace.active()) videoTrace.record({{"type","request"},{"sequence",double(requests)},{"full",full}});
     frameRequested.restart();
     send(updateRequest(decoder->image().size(),!full));
     if(full) fullFrame.restart();
@@ -386,6 +398,12 @@ void Session::setDuplicateEndpoint(bool duplicate) {
     emit diagnostic(duplicate?"Duplicate endpoint: using full frames for concurrent sessions":"Duplicate endpoint cleared: restoring configured refresh policy");
     requestFrame();
 }
+bool Session::startVideoTrace(const QString &path) {
+    if(!videoTrace.start(path)) return false;
+    emit diagnostic("Recording video packets (screen content): "+path);
+    refresh();return true;
+}
+void Session::stopVideoTrace() {videoTrace.stop();emit diagnostic("Video trace stopped");}
 QString Session::information() const {
     const double seconds=uptime.isValid()?uptime.elapsed()/1000.0:0;
     const auto size=decoder?decoder->image().size():QSize();

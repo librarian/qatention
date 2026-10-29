@@ -37,6 +37,7 @@ private:
     QAction *actualAction,*smoothAction,*backgroundAction,*reopenAction,*reconnectAction,*mountAction,*unmountAction;
     int fps=0,fullSeconds=5,quality=11,mode=444;
     int nextTabId=1;
+    QString traceFolder;
     bool smoke=false,closing=false;
     Tab *current() const;
     Tab *addTab(const QString &name={});

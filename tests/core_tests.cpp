@@ -58,6 +58,29 @@ public:
 class CoreTests : public QObject {
     Q_OBJECT
 private slots:
+    void videoTraceReplay() {
+        QTemporaryDir dir;VideoTrace trace;const auto path=dir.filePath("video.jsonl");
+        QVERIFY(trace.start(path));Decoder decoder;decoder.resize({8,8});
+        const auto white=QByteArray::fromHex("000001bc0000205300000000");
+        QVERIFY(decoder.decode(white,0x57));
+        QVERIFY(trace.record({{"type","request"},{"full",true},{"sequence",1}}));
+        QJsonObject video={{"type","video"},{"width",8},{"height",8},{"encoding",87},
+            {"payload",QString::fromLatin1(white.toBase64())},{"imageSha256",QString::fromLatin1(imageHash(decoder.image()))}};
+        QVERIFY(trace.record(video));
+        // A reconnect resets decoder state; a final disconnect must preserve the last output.
+        QVERIFY(trace.record({{"type","reset"}}));QVERIFY(trace.record(video));
+        QVERIFY(trace.record({{"type","reset"}}));trace.stop();
+        const auto png=dir.filePath("last.png");
+        QVERIFY(replayVideoTrace(path,png).contains("packets=2 compared=2 mismatches=0"));
+        QCOMPARE(QImage(png).pixel(0,0),qRgb(255,255,255));
+        QVERIFY_EXCEPTION_THROWN(replayVideoTrace(path,png),Error);
+        QVERIFY(!trace.start(path)); // Never overwrite a recording.
+        const auto bad=dir.filePath("bad.jsonl");QVERIFY(trace.start(bad));
+        video["imageSha256"]="wrong";QVERIFY(trace.record(video));trace.stop();
+        QVERIFY(replayVideoTrace(bad).contains("mismatches=1"));
+        QFile damaged(bad);QVERIFY(damaged.open(QIODevice::Append));damaged.write("{");damaged.close();
+        QVERIFY_EXCEPTION_THROWN(replayVideoTrace(bad),Error);
+    }
     void bundledClientIdentity() {
         Session session; // Initializes the static certificate resource.
         QSslSocket socket;
