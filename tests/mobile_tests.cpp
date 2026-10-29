@@ -197,6 +197,108 @@ private slots:
             QColor(Qt::black));
     }
 
+    void viewPreferencesPersistAndRejectInvalidValues()
+    {
+        QSettings().clear();
+        {
+            Mobile mobile;
+            QCOMPARE(mobile.viewSettings().value("fps").toInt(), 20);
+            QCOMPARE(mobile.viewSettings().value("fullSeconds").toInt(), 5);
+            mobile.setViewOption("fps", 30);
+            mobile.setViewOption("fullSeconds", -1);
+            mobile.setViewOption("quality", 6);
+            mobile.setViewOption("mode", 422);
+            mobile.setViewOption("smooth", true);
+            mobile.setViewOption("actualSize", true);
+            mobile.setViewOption("keyboard", false);
+            const auto valid = mobile.viewSettings();
+            mobile.setViewOption("fps", -10);
+            mobile.setViewOption("fullSeconds", 42);
+            mobile.setViewOption("quality", 12);
+            mobile.setViewOption("mode", 123);
+            mobile.setViewOption("unknown", true);
+            QCOMPARE(mobile.viewSettings(), valid);
+            mobile.background(false);
+            mobile.background(true);
+            QCOMPARE(mobile.viewSettings(), valid);
+            QVERIFY(!mobile.mediaBusy());
+            mobile.mountIso(QUrl::fromLocalFile("/missing.iso"));
+            mobile.power(2);
+            QVERIFY(!mobile.session.busy());
+            QVERIFY(!mobile.mediaBusy());
+        }
+        Mobile restored;
+        QCOMPARE(restored.viewSettings().value("fps").toInt(), 30);
+        QCOMPARE(restored.viewSettings().value("fullSeconds").toInt(), -1);
+        QCOMPARE(restored.viewSettings().value("quality").toInt(), 6);
+        QCOMPARE(restored.viewSettings().value("mode").toInt(), 422);
+        QVERIFY(restored.viewSettings().value("smooth").toBool());
+        QVERIFY(restored.viewSettings().value("actualSize").toBool());
+        QVERIFY(!restored.viewSettings().value("keyboard").toBool());
+        QSettings().clear();
+    }
+
+    void settingsDialogsAndKeyboardVisibility()
+    {
+        Mobile mobile;
+        QQmlApplicationEngine engine;
+        QSignalSpy warnings(&engine, &QQmlEngine::warnings);
+        engine.rootContext()->setContextProperty("mobile", &mobile);
+        engine.rootContext()->setContextProperty("connection", &mobile.session);
+        engine.rootContext()->setContextProperty("debugLog", &mobile.log);
+        engine.loadFromModule("MobileTest", "Main");
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto* window =
+            qobject_cast<QQuickWindow*>(engine.rootObjects().first());
+        QVERIFY(window);
+        window->resize(393, 800);
+        QVERIFY(QMetaObject::invokeMethod(
+            window->findChild<QObject*>("connectDialog"),
+            "close"));
+        auto* keyboard = window->findChild<QQuickItem*>("keyboard");
+        auto* viewport = window->findChild<QQuickItem*>("consoleViewport");
+        QVERIFY(keyboard && viewport);
+        auto* video = window->findChild<MobileVideo*>("consoleVideo");
+        QVERIFY(video);
+        QImage frame(1024, 768, QImage::Format_RGB32);
+        frame.fill(Qt::green);
+        emit mobile.session.frameReady(frame);
+        QTest::qWait(50);
+        const auto oldHeight = viewport->height();
+        mobile.setViewOption("keyboard", false);
+        QTRY_VERIFY(!keyboard->isVisible());
+        QTRY_VERIFY(viewport->height() > oldHeight);
+        mobile.setViewOption("actualSize", true);
+        QTRY_COMPARE(qRound(video->width()), 1024);
+        mobile.setViewOption("smooth", true);
+        QTRY_VERIFY(video->smooth());
+        mobile.setViewOption("actualSize", false);
+        QTRY_COMPARE(qRound(video->width()), 393);
+        for (const auto& size: {QSize(393, 800), QSize(800, 393)}) {
+            window->resize(size);
+            for (const auto* name: {"viewDialog", "mediaDialog", "powerDialog"})
+            {
+                auto* dialog = window->findChild<QObject*>(name);
+                QVERIFY(dialog);
+                QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+                QTest::qWait(100);
+                QVERIFY(dialog->property("height").toReal() < window->height());
+                QVERIFY(dialog->property("width").toReal() < window->width());
+                const auto screenshot =
+                    qEnvironmentVariable("QATENTION_SETTINGS_SCREENSHOT");
+                if (!screenshot.isEmpty() &&
+                    QString::fromLatin1(name) == "viewDialog" &&
+                    size.width() == 393)
+                {
+                    QVERIFY(window->grabWindow().save(screenshot));
+                }
+                QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+            }
+        }
+        QCOMPARE(warnings.size(), 0);
+        QSettings().clear();
+    }
+
     void fitZoomPanAndResize()
     {
         aten::Session session;

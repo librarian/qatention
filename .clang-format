@@ -103,8 +103,10 @@ IncludeCategories:
   Priority: 1
 - Regex: ^<Q
   Priority: 2
-- Regex: .*
+- Regex: '^<windows\.h>$'
   Priority: 3
+- Regex: .*
+  Priority: 4
 IncludeIsMainRegex: ([-_].*)?$
 IncludeIsMainSourceRegex: ''
 IndentAccessModifiers: false

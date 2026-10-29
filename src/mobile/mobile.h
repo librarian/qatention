@@ -1,5 +1,6 @@
 #pragma once
 #include "core/debuglog.h"
+#include "core/media.h"
 #include "core/session.h"
 
 #include <QMarginsF>
@@ -14,8 +15,37 @@ class Mobile: public QObject
     Q_PROPERTY(QVariantList profiles READ profiles NOTIFY profilesChanged)
     Q_PROPERTY(QString lastHost READ lastHost CONSTANT)
     Q_PROPERTY(QString lastUser READ lastUser CONSTANT)
+    Q_PROPERTY(
+        QVariantMap viewSettings READ viewSettings NOTIFY viewSettingsChanged)
+    Q_PROPERTY(bool mediaBusy READ mediaBusy NOTIFY mediaChanged)
+    Q_PROPERTY(QString mediaStatus READ mediaStatus NOTIFY mediaChanged)
+    Q_PROPERTY(QString mediaPath READ mediaPath NOTIFY mediaChanged)
+    Q_PROPERTY(QString powerStatus READ powerStatus NOTIFY powerStatusChanged)
 public:
     Mobile();
+    QVariantMap viewSettings() const;
+    Q_INVOKABLE void setViewOption(const QString& key, const QVariant& value);
+    Q_INVOKABLE void mountIso(const QUrl& url);
+    Q_INVOKABLE void unmountIso();
+    Q_INVOKABLE void power(int command);
+    Q_INVOKABLE void hotplug();
+
+    bool mediaBusy() const
+    {
+        return media.busy();
+    }
+
+    QString mediaStatus() const
+    {
+        return media.status();
+    }
+
+    QString mediaPath() const
+    {
+        return media.path();
+    }
+
+    QString powerStatus() const;
 
     QVariantList profiles() const
     {
@@ -72,6 +102,9 @@ public:
     Q_INVOKABLE void copyLogs();
     void background(bool active);
 signals:
+    void viewSettingsChanged();
+    void mediaChanged();
+    void powerStatusChanged();
     void profilesChanged();
     void safeInsetsChanged();
     void modifiersChanged();
@@ -80,6 +113,10 @@ signals:
 
 private:
     QSettings settings;
+    aten::Media media;
+    bool foreground = true;
+    int appliedQuality = -1, appliedMode = -1;
+    void applyViewSettings();
     QMarginsF insets;
     QTimer insetTimer;
     int modifierMask = 0;

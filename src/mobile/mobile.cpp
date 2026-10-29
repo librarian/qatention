@@ -61,6 +61,17 @@ Mobile::Mobile()
             if (!session.connected()) {
                 releaseModifiers();
             }
+            emit powerStatusChanged();
+        });
+    connect(&media, &aten::Media::diagnostic, &log, &aten::DebugLog::write);
+    connect(
+        &media,
+        &aten::Media::changed,
+        this,
+        [this]
+        {
+            session.setKeepMedia(media.busy());
+            emit mediaChanged();
         });
     connect(&session, &aten::Session::diagnostic, &log, &aten::DebugLog::write);
     connect(
@@ -74,7 +85,126 @@ Mobile::Mobile()
             pendingTrust = {{"host", host}, {"port", port}, {"sha256", hash}};
             emit trustRequested(host + ":" + QString::number(port), hash);
         });
-    session.setStreaming(true, 50, 5);
+    applyViewSettings();
+}
+
+QVariantMap Mobile::viewSettings() const
+{
+    QVariantMap result{
+        {"fps", 20},
+        {"fullSeconds", 5},
+        {"quality", 11},
+        {"mode", 444},
+        {"smooth", false},
+        {"keyboard", true},
+        {"actualSize", false}};
+    for (auto it = result.begin(); it != result.end(); ++it) {
+        it.value() = settings.value("mobileView/" + it.key(), it.value());
+    }
+    return result;
+}
+
+void Mobile::setViewOption(const QString& key, const QVariant& value)
+{
+    const auto current = viewSettings();
+    if (!current.contains(key)) {
+        return;
+    }
+    if (key == "fps" && !QList<int>{0, 10, 20, 30, 60}.contains(value.toInt()))
+    {
+        return;
+    }
+    if (key == "fullSeconds" &&
+        !QList<int>{-1, 0, 1, 2, 3, 5, 10}.contains(value.toInt()))
+    {
+        return;
+    }
+    if (key == "quality" && (value.toInt() < 0 || value.toInt() > 11)) {
+        return;
+    }
+    if (key == "mode" && value.toInt() != 444 && value.toInt() != 422) {
+        return;
+    }
+    if (current.value(key) == value) {
+        return;
+    }
+    settings.setValue("mobileView/" + key, value);
+    settings.sync();
+    if (key == "keyboard" && !value.toBool()) {
+        releaseModifiers();
+    }
+    applyViewSettings();
+    emit viewSettingsChanged();
+}
+
+void Mobile::applyViewSettings()
+{
+    const auto view = viewSettings();
+    const int fps = view.value("fps").toInt();
+    const int quality = view.value("quality").toInt(),
+              mode = view.value("mode").toInt();
+    if (quality != appliedQuality || mode != appliedMode) {
+        appliedQuality = quality;
+        appliedMode = mode;
+        session.setDisplay(quality, mode);
+    }
+    session.setStreaming(
+        foreground,
+        fps > 0 ? 1000 / fps : 0,
+        view.value("fullSeconds").toInt());
+}
+
+void Mobile::mountIso(const QUrl& url)
+{
+    if (!session.connected() || media.busy()) {
+        return;
+    }
+    if (!url.isLocalFile() && url.scheme() != "content") {
+        emit notice("Select an ISO from the device's file picker.");
+        return;
+    }
+    // Preserve Android content URIs; Qt's file engine opens the granted
+    // document.
+    const auto path = url.isLocalFile() ? url.toLocalFile()
+                                        : url.toString(QUrl::FullyEncoded);
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly) || file.size() <= 0 ||
+        file.isSequential() || !file.seek(file.size() - 1) || !file.seek(0))
+    {
+        emit notice(
+            "The ISO must be a readable, seekable file. Download it to device "
+            "storage first.");
+        return;
+    }
+    file.close();
+    media.mount(session.mediaEndpoint(), session.untrustedAllowed(), path);
+}
+
+void Mobile::unmountIso()
+{
+    media.unmount();
+}
+
+QString Mobile::powerStatus() const
+{
+    if (!session.connected() || session.hostPower() < 0) {
+        return "Power state unknown";
+    }
+    return session.hostPower() ? "Host is powered on" : "Host is powered off";
+}
+
+void Mobile::power(int command)
+{
+    if (session.connected() && command >= 0 && command <= 3) {
+        session.power(command);
+    }
+}
+
+void Mobile::hotplug()
+{
+    if (session.connected()) {
+        session.hotplug();
+    }
 }
 
 QString Mobile::trustKey() const
@@ -156,6 +286,7 @@ void Mobile::connectTo(
 
 void Mobile::disconnectSession()
 {
+    media.unmount();
     releaseModifiers();
     pendingTrust.clear();
     session.close();
@@ -301,7 +432,8 @@ void Mobile::copyLogs()
 void Mobile::background(bool active)
 {
     releaseModifiers();
-    session.setStreaming(active, 50, 5);
+    foreground = active;
+    applyViewSettings();
 }
 
 QRectF MobileVideo::imageRect() const
@@ -400,6 +532,7 @@ void MobileVideo::geometryChange(const QRectF& n, const QRectF& o)
 void MobileVideo::paint(QPainter* p)
 {
     p->fillRect(boundingRect(), Qt::black);
+    p->setRenderHint(QPainter::SmoothPixmapTransform, smooth());
     if (!frame.isNull()) {
         p->drawImage(imageRect(), frame);
     }

@@ -357,3 +357,22 @@ versions. Update CMake/application version metadata before building when needed;
 Android remains named `preview` until it is ready for a stable release. macOS
 bundles remain ad-hoc signed, not notarized. Release setup does not itself create
 a tag or release.
+
+### Android session controls
+
+Open **Menu** for:
+
+- **View settings:** fit/actual size, smooth scaling, keyboard visibility, frame
+  rate limit, full-frame refresh policy, quality and 4:4:4/4:2:2 display preference.
+  These preferences are saved on the device.
+- **Virtual media:** select an ISO with the system file picker, monitor its status
+  and unmount it. Use a local, seekable file; download cloud-hosted images first.
+  ISO data is read on demand, not copied into memory. Keep the app open while
+  serving media; Android background execution is not guaranteed. Disconnecting
+  asks for confirmation while media is attached and unmounts it.
+- **Power:** power on/off, reset or ACPI soft off, with confirmation before sending
+  the command. Current power state is shown when reported by the BMC.
+- **Ctrl+Alt+Delete**, **USB hotplug** and **Debug log**.
+
+Pinch and drag continue to zoom and scroll the console. **Fit** returns from
+actual-size mode to fitting the available console area.

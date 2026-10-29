@@ -8,8 +8,9 @@
 #include <QJsonObject>
 #include <QSaveFile>
 #ifdef Q_OS_WIN
-#include <wincrypt.h>
 #include <windows.h>
+
+#include <wincrypt.h>
 #endif
 namespace aten {
 QVariantMap Profiles::sanitize(const QVariantMap& o)
