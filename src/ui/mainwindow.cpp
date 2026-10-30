@@ -937,10 +937,11 @@ void MainWindow::makeMenus()
             QMessageBox::about(
                 this,
                 "QATENtion",
-                "QATENtion 0.2 — Qt/C++ ATEN console viewer\nBased on "
-                "ATENtion.\n\nNative desktop menus, console sessions and "
-                "read-only ISO "
-                "redirection.\nhttps://github.com/librarian/qatention");
+                "QATENtion " + QCoreApplication::applicationVersion() +
+                    " — Qt/C++ ATEN console viewer\nBased on "
+                    "ATENtion.\n\nNative desktop menus, console sessions and "
+                    "read-only ISO "
+                    "redirection.\nhttps://github.com/librarian/qatention");
         });
     action(help, "About Qt", [this] { QMessageBox::aboutQt(this); });
 }

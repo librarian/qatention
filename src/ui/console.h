@@ -12,6 +12,7 @@ class Console: public QWidget
             sessionChanged)
 public:
     explicit Console(QWidget* parent = nullptr);
+    ~Console() override;
 
     aten::Session* session() const
     {

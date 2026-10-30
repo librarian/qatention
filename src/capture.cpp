@@ -109,6 +109,7 @@ int main(int argc, char** argv)
         if (parser.isSet("check-native-decoder")) {
             aten::Decoder decoder;
             decoder.resize({8, 8});
+            // Known 8x8 ASPEED VQ white block used to verify native linkage.
             if (!decoder.decode(
                     QByteArray::fromHex("000001bc0000205300000000"),
                     0x57) ||
@@ -128,11 +129,11 @@ int main(int argc, char** argv)
                 return fallback;
             }
             bool ok = false;
-            const int n = parser.value(name).toInt(&ok);
-            if (!ok || n < 1 || n > max) {
+            const int value = parser.value(name).toInt(&ok);
+            if (!ok || value < 1 || value > max) {
                 throw aten::Error(("Invalid --" + name).toStdString());
             }
-            return n;
+            return value;
         };
         const int seconds = integer("timeout", 30, 86400);
         const int mediaPort = integer("vmedia-port", 0, 65535);
@@ -197,42 +198,54 @@ int main(int argc, char** argv)
         }
         bool finishing = false, mounted = false, started = false,
              rawSaved = false;
+        bool shutdownStarted = false;
+        int exitCode = 0;
+        auto exitWhenClean = [&]
+        {
+            if (shutdownStarted && !media.busy() && !session.logoutPending()) {
+                app.exit(exitCode);
+            }
+        };
+        QObject::connect(
+            &session,
+            &aten::Session::logoutsFinished,
+            &app,
+            exitWhenClean);
         auto finish = [&](int result)
         {
             if (finishing) {
                 return;
             }
             finishing = true;
+            exitCode = result;
             QTimer::singleShot(
                 0,
                 &app,
-                [&, result]
+                [&]
                 {
                     media.unmount();
                     session.close();
-                    QTimer::singleShot(
-                        mount ? 1100 : 0,
-                        &app,
-                        [&, result] { app.exit(result); });
+                    shutdownStarted = true;
+                    exitWhenClean();
                 });
         };
         auto attach = [&]
         {
-            auto e =
+            auto mediaEndpoint =
                 endpoint.host.isEmpty() ? session.mediaEndpoint() : endpoint;
             if (parser.isSet("vmedia-host")) {
-                e.host = parser.value("vmedia-host");
+                mediaEndpoint.host = parser.value("vmedia-host");
             }
             if (mediaPort) {
-                e.mediaPort = quint16(mediaPort);
+                mediaEndpoint.mediaPort = quint16(mediaPort);
             }
             if (parser.isSet("vmedia-plain")) {
-                e.tls = false;
+                mediaEndpoint.tls = false;
             }
             started = true;
             session.setKeepMedia(true);
             media.mount(
-                e,
+                mediaEndpoint,
                 !parser.isSet("verify-cert"),
                 parser.value("mount-iso"));
         };
@@ -242,6 +255,8 @@ int main(int argc, char** argv)
             &app,
             [&]
             {
+                session.setKeepMedia(media.busy());
+                exitWhenClean();
                 std::cerr << media.status().toStdString() << "\n";
                 if (media.status().startsWith("Mounted:")) {
                     mounted = true;

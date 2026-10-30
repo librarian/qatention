@@ -352,10 +352,33 @@ ApplicationWindow {
             TextField { id: user; Layout.fillWidth: true; placeholderText: "Username"; text: mobile.lastUser; onEditingFinished: password.text = mobile.savedPassword(host.text, text); inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText }
             TextField { id: password; Layout.fillWidth: true; placeholderText: "Password"; echoMode: TextInput.Password }
             CheckBox { id: unverified; text: "Allow unverified BMC certificates"; checked: false }
+            Button {
+                text: "Forget trusted console certificate…"
+                enabled: host.text.trim().length > 0
+                onClicked: forgetTrustConfirm.open()
+            }
             CheckBox { id: remember; text: "Save password on this device"; checked: true }
         }
         onAccepted: { mobile.connectTo(host.text,user.text,password.text,unverified.checked,remember.checked);password.clear() }
         onRejected: password.clear()
+    }
+    Dialog {
+        background: Rectangle { color: Material.background; radius: 12 }
+        id: forgetTrustConfirm
+        objectName: "forgetTrustConfirm"
+        title: "Forget console certificate?"
+        anchors.centerIn: parent
+        width: Math.min(window.width - 24, 440)
+        modal: true
+        standardButtons: Dialog.Yes | Dialog.No
+        contentItem: ColumnLayout {
+            Label {
+                Layout.fillWidth: true
+                text: "Remove the saved console certificate for " + host.text + "? The next connection will verify the replacement certificate. This affects all profiles for this host."
+                wrapMode: Text.WrapAnywhere
+            }
+        }
+        onAccepted: mobile.forgetConsoleTrust(host.text)
     }
     Dialog {
         background: Rectangle { color: Material.background; radius: 12 }

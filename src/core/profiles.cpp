@@ -13,7 +13,7 @@
 #include <wincrypt.h>
 #endif
 namespace aten {
-QVariantMap Profiles::sanitize(const QVariantMap& o)
+QVariantMap Profiles::sanitize(const QVariantMap& options)
 {
     QVariantMap result;
     for (const auto& key:
@@ -30,43 +30,43 @@ QVariantMap Profiles::sanitize(const QVariantMap& o)
           "autoReconnect",
           "consoleTrust"})
     {
-        if (o.contains(key)) {
-            result[key] = o[key];
+        if (options.contains(key)) {
+            result[key] = options[key];
         }
     }
     return result;
 }
 
-Profiles::Profiles(QString file, QObject* parent)
+Profiles::Profiles(QString filename, QObject* parent)
     : QObject(parent)
-    , path(std::move(file))
+    , path(std::move(filename))
 {
-    QFile f(path);
-    if (!f.exists()) {
+    QFile file(path);
+    if (!file.exists()) {
         return;
     }
-    QJsonParseError e;
-    if (!f.open(QIODevice::ReadOnly) || f.size() > 1024LL * 1024) {
+    QJsonParseError parseError;
+    if (!file.open(QIODevice::ReadOnly) || file.size() > 1024LL * 1024) {
         readable = false;
         problem = "Cannot read profiles file: " + path;
         return;
     }
-    auto doc = QJsonDocument::fromJson(f.readAll(), &e);
-    if (e.error != QJsonParseError::NoError || !doc.isObject() ||
-        doc.object().value("version").toInt() != 1 ||
-        !doc.object().value("profiles").isArray())
+    auto document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject() ||
+        document.object().value("version").toInt() != 1 ||
+        !document.object().value("profiles").isArray())
     {
         readable = false;
         problem = "Invalid profiles file; move it aside before saving: " + path;
         return;
     }
-    for (auto entry: doc.object().value("profiles").toArray()) {
-        auto o = entry.toObject().toVariantMap();
-        auto clean = sanitize(o);
+    for (auto entry: document.object().value("profiles").toArray()) {
+        auto options = entry.toObject().toVariantMap();
+        auto clean = sanitize(options);
 #ifdef Q_OS_WIN
-        if (o.contains("protectedPassword")) {
+        if (options.contains("protectedPassword")) {
             auto encrypted = QByteArray::fromBase64(
-                o.value("protectedPassword").toString().toLatin1());
+                options.value("protectedPassword").toString().toLatin1());
             DATA_BLOB input{
                 DWORD(encrypted.size()),
                 reinterpret_cast<BYTE*>(encrypted.data())},
@@ -92,14 +92,14 @@ Profiles::Profiles(QString file, QObject* parent)
             }
         }
 #else
-        if (o.contains("protectedPassword")) {
+        if (options.contains("protectedPassword")) {
             clean["password"] = QString();
             problem =
                 "Windows-protected passwords must be re-entered on this "
                 "platform.";
         }
 #endif
-        clean["name"] = o.value("name");
+        clean["name"] = options.value("name");
         items.append(clean);
     }
 }
@@ -142,18 +142,19 @@ bool Profiles::write(const QVariantList& next)
 #else
     const auto& stored = next;
 #endif
-    QSaveFile f(path);
+    QSaveFile file(path);
     const auto bytes =
         QJsonDocument(
             QJsonObject{
                 {"version", 1},
                 {"profiles", QJsonArray::fromVariantList(stored)}})
             .toJson();
-    if (!f.open(QIODevice::WriteOnly) ||
-        !f.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner) ||
-        f.write(bytes) != bytes.size() || !f.commit())
+    if (!file.open(QIODevice::WriteOnly) ||
+        !file.setPermissions(
+            QFileDevice::ReadOwner | QFileDevice::WriteOwner) ||
+        file.write(bytes) != bytes.size() || !file.commit())
     {
-        problem = "Cannot save profiles: " + f.errorString();
+        problem = "Cannot save profiles: " + file.errorString();
         emit changed();
         return false;
     }
@@ -163,18 +164,18 @@ bool Profiles::write(const QVariantList& next)
     return true;
 }
 
-bool Profiles::save(const QString& name, const QVariantMap& o)
+bool Profiles::save(const QString& name, const QVariantMap& options)
 {
     const auto label = name.trimmed();
     if (label.isEmpty() || label.size() > 128 ||
-        o.value("host").toString().trimmed().isEmpty())
+        options.value("host").toString().trimmed().isEmpty())
     {
         problem = "Enter a profile name and BMC host.";
         emit changed();
         return false;
     }
     auto next = items;
-    auto entry = sanitize(o);
+    auto entry = sanitize(options);
     entry["name"] = label;
     for (auto& item: next) {
         if (item.toMap().value("name") == label) {

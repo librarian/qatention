@@ -75,7 +75,7 @@ Session::Session(QObject* parent)
                 fail("BMC stopped responding", true);
                 return;
             }
-            send(QByteArray::fromHex("150000000100000000"));
+            send(consoleHeartbeat());
             if (powerPoll.elapsed() >= 10000) {
                 send(QByteArray(1, 0x37));
                 powerPoll.restart();
@@ -157,7 +157,8 @@ void Session::resetTransport()
         const auto cookies = web.cookieJar()->cookiesForUrl(baseUrl);
         const auto url = baseUrl;
         const bool trust = allowUntrusted;
-        auto logout = [cookies, url, trust]
+        const QPointer<Session> owner(this);
+        auto logout = [cookies, url, trust, owner]
         {
             // Survive closing a tab long enough to finish its bounded logout
             // request.
@@ -168,25 +169,42 @@ void Session::resetTransport()
             manager->setCookieJar(jar);
             QNetworkRequest request(url.resolved(QUrl("/cgi/logout.cgi")));
             request.setTransferTimeout(3000);
-            auto* r = manager->get(request);
+            auto* networkReply = manager->get(request);
+            // An absolute bound also covers a peer that trickles response
+            // bytes.
+            QTimer::singleShot(3000, networkReply, &QNetworkReply::abort);
+            if (owner) {
+                ++owner->activeLogouts;
+                QObject::connect(
+                    networkReply,
+                    &QNetworkReply::finished,
+                    owner,
+                    [owner]
+                    {
+                        --owner->activeLogouts;
+                        if (!owner->logoutPending()) {
+                            emit owner->logoutsFinished();
+                        }
+                    });
+            }
             QObject::connect(
-                r,
+                networkReply,
                 &QNetworkReply::sslErrors,
                 manager,
-                [r, trust](const QList<QSslError>& errors)
+                [networkReply, trust](const QList<QSslError>& errors)
                 {
-                    if (trust ||
-                        (CertificateChain::missingIssuerOnly(errors) &&
-                         CertificateChain::verify(
-                             CertificateChain::cached(
-                                 r->sslConfiguration().peerCertificateChain()),
-                             r->url().host())))
+                    if (trust || (CertificateChain::missingIssuerOnly(errors) &&
+                                  CertificateChain::verify(
+                                      CertificateChain::cached(
+                                          networkReply->sslConfiguration()
+                                              .peerCertificateChain()),
+                                      networkReply->url().host())))
                     {
-                        r->ignoreSslErrors(errors);
+                        networkReply->ignoreSslErrors(errors);
                     }
                 });
             QObject::connect(
-                r,
+                networkReply,
                 &QNetworkReply::finished,
                 manager,
                 &QObject::deleteLater);
@@ -240,27 +258,27 @@ void Session::fail(const QString& text, bool transient)
     }
 }
 
-void Session::open(const QVariantMap& o)
+void Session::open(const QVariantMap& options)
 {
     close();
     emit diagnostic("TLS backend: " + QSslSocket::activeBackend());
-    if (o.value("autoArm", true).toBool() &&
-        o.value("autoReconnect", true).toBool())
+    if (options.value("autoArm", true).toBool() &&
+        options.value("autoReconnect", true).toBool())
     {
-        reconnectOptions = o;
+        reconnectOptions = options;
     }
-    startAttempt(o);
+    startAttempt(options);
 }
 
-void Session::startAttempt(const QVariantMap& o)
+void Session::startAttempt(const QVariantMap& options)
 {
     try {
-        consoleTrust = o.value("consoleTrust").toMap();
-        allowUntrusted = o.value("allowUntrusted", true).toBool();
-        switchJava = o.value("switchJava").toBool();
+        consoleTrust = options.value("consoleTrust").toMap();
+        allowUntrusted = options.value("allowUntrusted", true).toBool();
+        switchJava = options.value("switchJava").toBool();
         // Streaming cadence is controlled by the View menu and survives
         // reconnects.
-        launch.host = o.value("host").toString().trimmed();
+        launch.host = options.value("host").toString().trimmed();
         if (launch.host.contains("://")) {
             launch.host = QUrl(launch.host).host();
         } else {
@@ -281,18 +299,18 @@ void Session::startAttempt(const QVariantMap& o)
         {
             throw Error("Enter a BMC hostname or IP address");
         }
-        launch.user = o.value("user").toString();
-        launch.password = o.value("password").toString();
+        launch.user = options.value("user").toString();
+        launch.password = options.value("password").toString();
         if (launch.user.isEmpty() || launch.password.isEmpty()) {
             throw Error("Enter credentials");
         }
-        if (o.value("autoArm", true).toBool()) {
+        if (options.value("autoArm", true).toBool()) {
             phase = Phase::Web;
             baseUrl = QUrl();
             baseUrl.setScheme(
-                o.value("http", false).toBool() ? "http" : "https");
+                options.value("http", false).toBool() ? "http" : "https");
             baseUrl.setHost(launch.host);
-            auto webPort = o.value("webPort", 443).toInt();
+            auto webPort = options.value("webPort", 443).toInt();
             if (webPort < 1 || webPort > 65535) {
                 throw Error("Invalid HTTPS port");
             }
@@ -305,16 +323,16 @@ void Session::startAttempt(const QVariantMap& o)
             launch.user.clear();
             launch.password.clear();
             setStatus("Logging in to BMC…");
-            requestWeb("/cgi/login.cgi", body, 0);
+            requestWeb("/cgi/login.cgi", body, WebStep::Login);
         } else {
-            auto port = o.value("port", 5900).toInt();
+            auto port = options.value("port", 5900).toInt();
             if (port < 1 || port > 65535) {
                 throw Error("Invalid KVM port");
             }
-            launch.mediaPort =
-                quint16(qBound(1, o.value("mediaPort", 623).toInt(), 65535));
+            launch.mediaPort = quint16(
+                qBound(1, options.value("mediaPort", 623).toInt(), 65535));
             launch.port = quint16(port);
-            launch.tls = o.value("tls", true).toBool();
+            launch.tls = options.value("tls", true).toBool();
             credentials(launch.user, launch.password);
             connectKvm();
         }
@@ -326,13 +344,13 @@ void Session::startAttempt(const QVariantMap& o)
 void Session::requestWeb(
     const QString& path,
     const QByteArray& body,
-    int step,
+    WebStep step,
     const QByteArray& csrf,
     bool chainRetried)
 {
     tlsFailure.clear();
     emit diagnostic(QString("HTTPS request step %1 to %2:%3: %4")
-                        .arg(step)
+                        .arg(int(step))
                         .arg(baseUrl.host())
                         .arg(baseUrl.port())
                         .arg(path));
@@ -356,59 +374,70 @@ void Session::requestWeb(
             QNetworkRequest::ContentTypeHeader,
             "application/x-www-form-urlencoded");
     }
-    auto* r = body.isEmpty() ? web.get(request) : web.post(request, body);
-    reply = r;
+    auto* networkReply =
+        body.isEmpty() ? web.get(request) : web.post(request, body);
+    reply = networkReply;
     const auto epoch = generation;
     auto missingChain = std::make_shared<QList<QSslCertificate>>();
     connect(
-        r,
+        networkReply,
         &QNetworkReply::sslErrors,
         this,
-        [this, r, missingChain](const QList<QSslError>& errors)
+        [this, networkReply, missingChain](const QList<QSslError>& errors)
         {
             reportTlsErrors("HTTPS", errors);
             if (allowUntrusted) {
-                r->ignoreSslErrors();
+                networkReply->ignoreSslErrors();
                 return;
             }
             if (!CertificateChain::missingIssuerOnly(errors)) {
                 return;
             }
-            const auto peer = r->sslConfiguration().peerCertificateChain();
+            const auto peer =
+                networkReply->sslConfiguration().peerCertificateChain();
             if (CertificateChain::verify(
                     CertificateChain::cached(peer),
-                    r->url().host()))
+                    networkReply->url().host()))
             {
                 emit diagnostic(
                     "HTTPS: peer chain verified using cached intermediates");
-                r->ignoreSslErrors(errors);
+                networkReply->ignoreSslErrors(errors);
             } else {
                 *missingChain = peer;
             }
         });
     connect(
-        r,
+        networkReply,
         &QNetworkReply::readyRead,
         this,
-        [this, r]
+        [this, networkReply]
         {
-            if (r->bytesAvailable() > 1024LL * 1024) {
+            if (networkReply->bytesAvailable() > 1024LL * 1024) {
                 fail("BMC web response is too large");
             }
         });
     connect(
-        r,
+        networkReply,
         &QNetworkReply::finished,
         this,
-        [this, r, step, epoch, path, body, csrf, chainRetried, missingChain]
+        [this,
+         networkReply,
+         step,
+         epoch,
+         path,
+         body,
+         csrf,
+         chainRetried,
+         missingChain]
         {
             if (epoch != generation) {
-                r->deleteLater();
+                networkReply->deleteLater();
                 return;
             }
             reply = nullptr;
-            r->deleteLater();
-            if (r->error() == QNetworkReply::SslHandshakeFailedError &&
+            networkReply->deleteLater();
+            if (networkReply->error() ==
+                    QNetworkReply::SslHandshakeFailedError &&
                 !chainRetried && !missingChain->isEmpty())
             {
                 // The TLS handshake failed before any HTTP credentials were
@@ -417,7 +446,7 @@ void Session::requestWeb(
                 CertificateChain::fetch(
                     issuerFetch,
                     *missingChain,
-                    r->url().host(),
+                    networkReply->url().host(),
                     [this, epoch](const QString& message)
                     {
                         if (epoch == generation) {
@@ -440,41 +469,44 @@ void Session::requestWeb(
                     });
                 return;
             }
-            if (r->error() != QNetworkReply::NoError) {
+            if (networkReply->error() != QNetworkReply::NoError) {
                 fail(
-                    tlsFailure.isEmpty()
-                        ? "BMC web request failed: " + r->errorString()
-                        : tlsFailure,
-                    r->error() == QNetworkReply::ConnectionRefusedError ||
-                        r->error() == QNetworkReply::RemoteHostClosedError ||
-                        r->error() == QNetworkReply::HostNotFoundError ||
-                        r->error() == QNetworkReply::TimeoutError ||
-                        r->error() ==
+                    tlsFailure.isEmpty() ? "BMC web request failed: " +
+                                               networkReply->errorString()
+                                         : tlsFailure,
+                    networkReply->error() ==
+                            QNetworkReply::ConnectionRefusedError ||
+                        networkReply->error() ==
+                            QNetworkReply::RemoteHostClosedError ||
+                        networkReply->error() ==
+                            QNetworkReply::HostNotFoundError ||
+                        networkReply->error() == QNetworkReply::TimeoutError ||
+                        networkReply->error() ==
                             QNetworkReply::TemporaryNetworkFailureError);
                 return;
             }
             tlsFailure.clear();
-            auto b = r->readAll();
+            auto responseBody = networkReply->readAll();
             emit diagnostic(QString("Web response step %1: %2 bytes")
-                                .arg(step)
-                                .arg(b.size()));
-            if (b.size() > 1024LL * 1024) {
+                                .arg(int(step))
+                                .arg(responseBody.size()));
+            if (responseBody.size() > 1024LL * 1024) {
                 fail("BMC web response is too large");
                 return;
             }
             try {
-                handleWeb(b, step);
+                handleWeb(responseBody, step);
             } catch (const std::exception& e) {
                 fail(QString::fromUtf8(e.what()));
             }
         });
 }
 
-void Session::handleWeb(const QByteArray& body, int step)
+void Session::handleWeb(const QByteArray& body, WebStep step)
 {
     const QString jnlpPath =
         "/cgi/url_redirect.cgi?url_name=ikvm&url_type=jwsk";
-    if (step == 0) {
+    if (step == WebStep::Login) {
         if (web.cookieJar()->cookiesForUrl(baseUrl).isEmpty()) {
             throw Error(
                 "BMC did not create a login session; check credentials");
@@ -482,26 +514,29 @@ void Session::handleWeb(const QByteArray& body, int step)
         webAuthenticated = true;
         setStatus("Requesting console credentials…");
         if (switchJava) {
-            requestWeb("/cgi/url_redirect.cgi?url_name=topmenu", {}, 1);
+            requestWeb(
+                "/cgi/url_redirect.cgi?url_name=topmenu",
+                {},
+                WebStep::ConsoleMenu);
         } else {
-            requestWeb(jnlpPath, {}, 3);
+            requestWeb(jnlpPath, {}, WebStep::Launch);
         }
-    } else if (step == 1) {
+    } else if (step == WebStep::ConsoleMenu) {
         static const QRegularExpression re(
             R"re(SmcCsrfInsert\s*\(\s*["']CSRF_TOKEN["']\s*,\s*["']([^"']+)["'])re",
             QRegularExpression::CaseInsensitiveOption);
-        const auto m = re.match(QString::fromUtf8(body));
-        if (m.hasMatch()) {
+        const auto match = re.match(QString::fromUtf8(body));
+        if (match.hasMatch()) {
             requestWeb(
                 "/cgi/op.cgi",
                 "op=remote_console&ikvm_setting=0",
-                2,
-                m.captured(1).toLatin1());
+                WebStep::ConfigureJava,
+                match.captured(1).toLatin1());
         } else {
-            requestWeb(jnlpPath, {}, 3);
+            requestWeb(jnlpPath, {}, WebStep::Launch);
         }
-    } else if (step == 2) {
-        requestWeb(jnlpPath, {}, 3);
+    } else if (step == WebStep::ConfigureJava) {
+        requestWeb(jnlpPath, {}, WebStep::Launch);
     } else {
         const auto originalHost = launch.host;
         launch = parseJnlp(body);
@@ -751,16 +786,19 @@ void Session::process()
                     if (buffer.size() < 24) {
                         return;
                     }
-                    const auto n = be32(buffer, 20);
-                    if (n > 65536) {
+                    // ServerInit: BE16 dimensions, pixel format, BE32 name
+                    // length, name bytes and the existing 12-byte ATEN
+                    // extension.
+                    const auto nameLength = be32(buffer, 20);
+                    if (nameLength > 65536) {
                         throw Error("Server name is too long");
                     }
-                    if (buffer.size() < 36 + n) {
+                    if (buffer.size() < 36 + nameLength) {
                         return;
                     }
                     const QSize size(be16(buffer, 0), be16(buffer, 2));
                     decoder->resize(size);
-                    buffer.remove(0, 36 + n);
+                    buffer.remove(0, 36 + nameLength);
                     phase = Phase::Messages;
                     established = true;
                     deadline.stop();
@@ -774,7 +812,7 @@ void Session::process()
                     sessionUsers.clear();
                     userBurst.clear();
                     setStatus("Connected — click the console to send input");
-                    send(QByteArray::fromHex("37070780360001"));
+                    send(consoleStartup());
                     setDisplay(quality, imageMode);
                     forceFull = true;
                     requestFrame();
@@ -802,9 +840,9 @@ bool Session::consumeMessage()
     if (buffer.isEmpty()) {
         return false;
     }
-    const auto type = quint8(buffer[0]);
+    const auto type = ServerMessageType(quint8(buffer[0]));
     qsizetype length = 0;
-    if (type == 0) {
+    if (type == ServerMessageType::FramebufferUpdate) {
         if (buffer.size() < 4) {
             return false;
         }
@@ -817,11 +855,15 @@ bool Session::consumeMessage()
             if (buffer.size() < length + 20) {
                 return false;
             }
-            const auto n = be32(buffer, length + 16);
-            if (n > MaxPacket || length + 20 + n > MaxPacket) {
+            const auto rectangle = FramebufferRectangle::parse(buffer, length);
+            const auto payloadLength = rectangle.payloadLength;
+            if (payloadLength > MaxPacket ||
+                length + FramebufferRectangle::WireSize + payloadLength >
+                    MaxPacket)
+            {
                 throw Error("Framebuffer update is too large");
             }
-            length += 20 + n;
+            length += FramebufferRectangle::WireSize + payloadLength;
             if (buffer.size() < length) {
                 return false;
             }
@@ -829,28 +871,32 @@ bool Session::consumeMessage()
         qsizetype pos = 4;
         bool changed = false, noSignal = false;
         for (int i = 0; i < count; ++i) {
-            const int x = be16(buffer, pos), y = be16(buffer, pos + 2),
-                      w = be16(buffer, pos + 4), h = be16(buffer, pos + 6);
-            const auto encoding = be32(buffer, pos + 8),
-                       n = be32(buffer, pos + 16);
+            const auto rectangle = FramebufferRectangle::parse(buffer, pos);
+            const int x = rectangle.x, y = rectangle.y;
+            const int width = rectangle.width, height = rectangle.height;
+            const auto encoding = rectangle.encoding;
+            const auto payloadLength = rectangle.payloadLength;
             emit diagnostic(
                 QString("Video rectangle %1x%2 at %3,%4, encoding %5, %6 bytes")
-                    .arg(w)
-                    .arg(h)
+                    .arg(width)
+                    .arg(height)
                     .arg(x)
                     .arg(y)
                     .arg(encoding)
-                    .arg(n));
-            if (!n) {
-                noSignal |= w >= 0x8000 || h >= 0x8000;
+                    .arg(payloadLength));
+            if (!payloadLength) {
+                noSignal |= width >= 0x8000 || height >= 0x8000;
             } else {
-                if (x == 0 && y == 0 && decoder->image().size() != QSize(w, h))
+                if (x == 0 && y == 0 &&
+                    decoder->image().size() != QSize(width, height))
                 {
-                    decoder->resize({w, h});
+                    decoder->resize({width, height});
                     forceFull = true;
                 }
                 try {
-                    const auto packet = buffer.mid(pos + 20, n);
+                    const auto packet = buffer.mid(
+                        pos + FramebufferRectangle::WireSize,
+                        payloadLength);
                     emit videoPacket(packet, encoding);
                     if (!decoder) {
                         return false;
@@ -876,11 +922,13 @@ bool Session::consumeMessage()
                             "Video trace stopped: size limit or write error");
                     }
                 } catch (...) {
-                    emit unsupportedFrame(buffer.mid(pos + 20, n));
+                    emit unsupportedFrame(buffer.mid(
+                        pos + FramebufferRectangle::WireSize,
+                        payloadLength));
                     throw;
                 }
             }
-            pos += 20 + n;
+            pos += FramebufferRectangle::WireSize + payloadLength;
         }
         buffer.remove(0, length);
         pending = false;
@@ -900,7 +948,7 @@ bool Session::consumeMessage()
         return true;
     }
     switch (type) {
-        case 4:
+        case ServerMessageType::Cursor:
             if (buffer.size() < 21) {
                 return false;
             }
@@ -914,19 +962,19 @@ bool Session::consumeMessage()
                 length = 25 + qsizetype(pixels) * 2;
             }
             break;
-        case 0x16:
+        case ServerMessageType::Keepalive:
             length = 2;
             break;
-        case 0x35:
+        case ServerMessageType::Reserved35:
             length = 6;
             break;
-        case 0x37:
+        case ServerMessageType::PowerState:
             length = 4;
             break;
-        case 0x39:
+        case ServerMessageType::UserNotice:
             length = 265;
             break;
-        case 0x3c:
+        case ServerMessageType::Reserved3c:
             length = 9;
             break;
         default:
@@ -937,11 +985,11 @@ bool Session::consumeMessage()
     if (buffer.size() < length) {
         return false;
     }
-    if (type == 0x37) {
+    if (type == ServerMessageType::PowerState) {
         powerState = buffer[3] ? 1 : 0;
         emit stateChanged();
     }
-    if (type == 0x39) {
+    if (type == ServerMessageType::UserNotice) {
         const auto index = be32(buffer, 1), kind = be32(buffer, 5);
         const auto info =
             QString::fromLatin1(buffer.mid(9, 256).split('\0').first())
@@ -1082,10 +1130,10 @@ namespace aten {
 void Session::power(int command)
 {
     if (connected() && command >= 0 && command <= 3) {
-        QByteArray b(2, 0);
-        b[0] = 0x1a;
-        b[1] = char(command);
-        send(b);
+        QByteArray request(2, 0);
+        request[0] = 0x1a;   // Power command: off/on/reset/ACPI in byte 1.
+        request[1] = char(command);
+        send(request);
     }
 }
 
@@ -1099,24 +1147,20 @@ void Session::hotplug()
 void Session::combo(const QList<quint32>& keys)
 {
     releaseInput();
-    for (auto k: keys) {
-        key(k, true);
+    for (auto usage: keys) {
+        key(usage, true);
     }
-    for (auto i = keys.crbegin(); i != keys.crend(); ++i) {
-        key(*i, false);
+    for (auto usage = keys.crbegin(); usage != keys.crend(); ++usage) {
+        key(*usage, false);
     }
 }
 
-void Session::setDisplay(int q, int mode)
+void Session::setDisplay(int requestedQuality, int mode)
 {
-    quality = qBound(0, q, 11);
+    quality = qBound(0, requestedQuality, 11);
     imageMode = mode == 422 ? 422 : 444;
     if (connected()) {
-        QByteArray b(5, 0);
-        b[0] = 0x32;
-        b[2] = char(quality);
-        put16(b, 3, quint16(imageMode));
-        send(b);
+        send(displaySettings(quality, imageMode));
         refresh();
     }
 }

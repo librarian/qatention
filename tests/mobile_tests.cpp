@@ -1,5 +1,8 @@
 #include "mobile/mobile.h"
 
+#include "mockconsole.h"
+
+#include <QCryptographicHash>
 #include <QPainter>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -7,6 +10,8 @@
 #include <QQuickWindow>
 #include <QTemporaryDir>
 #include <QtTest>
+
+#include <memory>
 
 class MobileTests: public QObject
 {
@@ -34,8 +39,55 @@ private slots:
         qmlRegisterType<MobileVideo>("Qatention.Native", 1, 0, "ConsoleVideo");
     }
 
+    void signalLossReleasesDrag()
+    {
+        MockConsole server;
+        server.connectSession();
+        QVERIFY(server.session.connected());
+        MobileVideo video;
+        video.setWidth(640);
+        video.setHeight(480);
+        video.setSession(&server.session);
+        QImage frame(640, 480, QImage::Format_ARGB32);
+        frame.fill(Qt::black);
+        server.session.frameReady(frame);
+        video.pointer(10, 10, true);
+        QTRY_VERIFY(server.peer->bytesAvailable() >= 18);
+        server.peer->readAll();
+        server.session.clearFrame();
+        video.pointer(10, 10, false);
+        QTRY_VERIFY(server.peer->bytesAvailable() >= 18);
+        QCOMPARE(server.peer->readAll(), aten::pointerEvent(10, 10, 0));
+    }
+
+    void explicitlyForgetHostTrust()
+    {
+        QSettings settings;
+        const QString key =
+            "consoleTrust/" + QString::fromLatin1(
+                                  QCryptographicHash::hash(
+                                      "bmc.example",
+                                      QCryptographicHash::Sha256)
+                                      .toHex());
+        settings.setValue(
+            key,
+            QVariantMap{{"host", "bmc.example"}, {"sha256", "old"}});
+        settings.setValue("consoleTrust/unrelated", "keep");
+        settings.sync();
+        Mobile mobile;
+        mobile.forgetConsoleTrust("https://BMC.EXAMPLE/");
+        settings.sync();
+        QVERIFY(!settings.contains(key));
+        QCOMPARE(
+            settings.value("consoleTrust/unrelated").toString(),
+            QString("keep"));
+        settings.clear();
+    }
+
     void phoneLayoutAndRenderedFrame()
     {
+        // Destroy the input device after the window and its delivery agent.
+        std::unique_ptr<QPointingDevice> touchDevice;
         Mobile mobile;
         QQmlApplicationEngine engine;
         engine.rootContext()->setContextProperty("mobile", &mobile);
@@ -97,7 +149,8 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(viewport, "fit"));
         QCOMPARE(viewport->property("contentX").toDouble(), 0.0);
         QCOMPARE(qRound(video->width()), 393);
-        auto* device = QTest::createTouchDevice();
+        touchDevice.reset(QTest::createTouchDevice());
+        auto* device = touchDevice.get();
         const int cy = qRound(
             viewport->mapToScene(QPointF(0, viewport->height() / 2)).y());
         QTest::touchEvent(window, device)
@@ -278,7 +331,11 @@ private slots:
         QTRY_COMPARE(qRound(video->width()), 393);
         for (const auto& size: {QSize(393, 800), QSize(800, 393)}) {
             window->resize(size);
-            for (const auto* name: {"viewDialog", "mediaDialog", "powerDialog"})
+            for (const auto* name:
+                 {"viewDialog",
+                  "mediaDialog",
+                  "powerDialog",
+                  "forgetTrustConfirm"})
             {
                 auto* dialog = window->findChild<QObject*>(name);
                 QVERIFY(dialog);

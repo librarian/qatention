@@ -314,6 +314,31 @@ void Mobile::trustConsole()
     session.open(options);
 }
 
+void Mobile::forgetConsoleTrust(const QString& host)
+{
+    auto normalized = host.trimmed();
+    if (normalized.contains("://")) {
+        normalized = QUrl(normalized).host();
+    }
+    const auto key = "consoleTrust/" + QString::fromLatin1(
+                                           QCryptographicHash::hash(
+                                               normalized.toLower().toUtf8(),
+                                               QCryptographicHash::Sha256)
+                                               .toHex());
+    // Explicit user action; deleting a login profile alone must not silently
+    // discard shared, host-level trust for other users of that BMC.
+    settings.remove(key);
+    settings.sync();
+    if (settings.status() != QSettings::NoError) {
+        emit notice("Cannot remove console certificate trust.");
+        return;
+    }
+    pendingTrust.clear();
+    emit notice(
+        "Saved console certificate forgotten. Connect again to review the new "
+        "certificate.");
+}
+
 void Mobile::removeProfile(const QString& host, const QString& user)
 {
     const auto idKey = identity(host, user);
@@ -488,7 +513,10 @@ void MobileVideo::setSession(aten::Session* s)
             this,
             [this]
             {
+                release();   // Signal loss must not swallow the eventual
+                             // finger-up.
                 frame = {};
+                emit frameSizeChanged();
                 update();
             });
     }

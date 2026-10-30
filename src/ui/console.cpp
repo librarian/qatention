@@ -150,7 +150,86 @@ static quint32 physicalUsage(QKeyEvent* e)
         scan = 0;   // XKB evdev keycodes.
     }
 #endif
+#ifdef Q_OS_WIN
+    // Qt marks Windows E0 scan codes with bit 8. Convert the right modifiers
+    // and extended keypad keys to the evdev values used below.
+    switch (scan) {
+        case 0x11d:
+            scan = 97;
+            break;   // Right Control.
+        case 0x138:
+            scan = 100;
+            break;   // Right Alt.
+        case 0x15b:
+            return 0xe3;   // Left Windows.
+        case 0x15c:
+            return 0xe7;   // Right Windows.
+        case 0x11c:
+            scan = 96;
+            break;   // Keypad Enter.
+        case 0x135:
+            scan = 98;
+            break;   // Keypad Divide.
+        default:
+            break;
+    }
+#endif
 #if defined(Q_OS_WIN) || defined(Q_OS_LINUX)
+    // Preserve physical identity, independently of Num Lock and layout.
+    switch (scan) {
+        case 29:
+            return 0xe0;   // Left Control.
+        case 42:
+            return 0xe1;   // Left Shift.
+        case 54:
+            return 0xe5;   // Right Shift.
+        case 56:
+            return 0xe2;   // Left Alt.
+        case 97:
+            return 0xe4;   // Right Control.
+        case 100:
+            return 0xe6;   // Right Alt.
+#ifdef Q_OS_LINUX
+        case 125:
+            return 0xe3;   // Left Meta.
+        case 126:
+            return 0xe7;   // Right Meta.
+#endif
+        case 55:
+            return 0x55;   // Keypad multiply.
+        case 71:
+            return 0x5f;   // Keypad 7.
+        case 72:
+            return 0x60;   // Keypad 8.
+        case 73:
+            return 0x61;   // Keypad 9.
+        case 74:
+            return 0x56;   // Keypad minus.
+        case 75:
+            return 0x5c;   // Keypad 4.
+        case 76:
+            return 0x5d;   // Keypad 5.
+        case 77:
+            return 0x5e;   // Keypad 6.
+        case 78:
+            return 0x57;   // Keypad plus.
+        case 79:
+            return 0x59;   // Keypad 1.
+        case 80:
+            return 0x5a;   // Keypad 2.
+        case 81:
+            return 0x5b;   // Keypad 3.
+        case 82:
+            return 0x62;   // Keypad 0.
+        case 83:
+            return 0x63;   // Keypad decimal.
+        case 96:
+            return 0x58;   // Keypad Enter.
+        case 98:
+            return 0x54;   // Keypad divide.
+        default:
+            break;
+    }
     if (scan >= 2 && scan <= 10) {
         return 0x1e + scan - 2;
     }
@@ -191,6 +270,31 @@ static quint32 physicalUsage(QKeyEvent* e)
         return 0x89;
     }
 #endif
+    if (e->modifiers().testFlag(Qt::KeypadModifier)) {
+        if (e->key() >= Qt::Key_1 && e->key() <= Qt::Key_9) {
+            return 0x59 + quint32(e->key() - Qt::Key_1);
+        }
+        switch (e->key()) {
+            case Qt::Key_0:
+                return 0x62;
+            case Qt::Key_Enter:
+            case Qt::Key_Return:
+                return 0x58;
+            case Qt::Key_Plus:
+                return 0x57;
+            case Qt::Key_Minus:
+                return 0x56;
+            case Qt::Key_Asterisk:
+                return 0x55;
+            case Qt::Key_Slash:
+                return 0x54;
+            case Qt::Key_Period:
+            case Qt::Key_Comma:
+                return 0x63;
+            default:
+                break;
+        }
+    }
     return usageFor(e->key());
 }
 
@@ -265,6 +369,16 @@ Console::Console(QWidget* parent)
                 release();
             }
         });
+}
+
+Console::~Console()
+{
+    // Child sessions emit clearFrame during QWidget teardown, after our members
+    // have been destroyed. Disconnect while this is still a Console.
+    release();
+    if (connection) {
+        disconnect(connection, nullptr, this, nullptr);
+    }
 }
 
 void Console::setView(bool a, bool s)
@@ -495,7 +609,8 @@ bool Console::event(QEvent* e)
         release();
     }
     if (e->type() == QEvent::KeyPress &&
-        static_cast<QKeyEvent*>(e)->key() == Qt::Key_Tab)
+        (static_cast<QKeyEvent*>(e)->key() == Qt::Key_Tab ||
+         static_cast<QKeyEvent*>(e)->key() == Qt::Key_Backtab))
     {
         keyPressEvent(static_cast<QKeyEvent*>(e));
         return true;

@@ -9,6 +9,22 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+option(QATENTION_NATIVE_TESTS_ONLY "Build native decoder tests without Qt (for MSan)" OFF)
+include(cmake/Sanitizers.cmake)
+include(CTest)
+add_library(aspeed STATIC third_party/aspeed/decoder.c)
+set_target_properties(aspeed PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(BUILD_TESTING)
+    add_executable(native_decoder_tests tests/native_decoder_tests.c)
+    target_include_directories(native_decoder_tests PRIVATE src)
+    target_link_libraries(native_decoder_tests PRIVATE aspeed)
+    add_test(NAME native_decoder COMMAND native_decoder_tests)
+    set_tests_properties(native_decoder PROPERTIES TIMEOUT 60)
+endif()
+if(QATENTION_NATIVE_TESTS_ONLY)
+    return()
+endif()
+
 option(QATENTION_MOBILE "Build the Qt Quick mobile interface (also available on desktop for testing)" OFF)
 if(ANDROID OR QATENTION_MOBILE)
     find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Network Quick QuickControls2)
@@ -18,8 +34,6 @@ endif()
 qt_standard_project_setup(REQUIRES 6.8)
 include(GNUInstallDirs)
 
-add_library(aspeed STATIC third_party/aspeed/decoder.c)
-set_target_properties(aspeed PROPERTIES POSITION_INDEPENDENT_CODE ON)
 # The upstream C source uses GNU variadic macros; Clang/GCC are the supported compilers.
 add_library(qatention_core STATIC
     src/core/decoder.cpp src/core/decoder.h
@@ -29,6 +43,8 @@ add_library(qatention_core STATIC
     src/core/certificatechain.cpp src/core/certificatechain.h
     src/core/debuglog.cpp src/core/debuglog.h
     src/core/media.cpp src/core/media.h
+    src/core/mediaprotocol.cpp src/core/mediaprotocol.h
+    src/core/scsi.cpp src/core/scsi.h
     src/core/videotrace.cpp src/core/videotrace.h)
 target_include_directories(qatention_core PUBLIC src)
 target_compile_definitions(qatention_core PUBLIC QATENTION_VERSION="${QATENTION_VERSION}")
@@ -115,6 +131,10 @@ if(BUILD_TESTING)
         tests/certificates/root.pem tests/certificates/issuer.pem tests/certificates/leaf.pem tests/certificates/leaf.key)
     add_test(NAME certificatechain COMMAND certificatechain_tests)
     set_tests_properties(certificatechain PROPERTIES TIMEOUT 30 RESOURCE_LOCK aia_test_port)
+    qt_add_executable(input_tests tests/input_tests.cpp src/ui/console.cpp src/ui/console.h)
+    target_link_libraries(input_tests PRIVATE qatention_core Qt6::Widgets Qt6::Test)
+    add_test(NAME input COMMAND input_tests)
+    set_tests_properties(input PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
     qt_add_executable(ui_tests tests/ui_tests.cpp src/ui/mainwindow.cpp src/ui/mainwindow.h src/ui/console.cpp src/ui/console.h)
     target_link_libraries(ui_tests PRIVATE qatention_core Qt6::Widgets Qt6::Test)
     add_test(NAME ui COMMAND ui_tests)
@@ -124,7 +144,15 @@ if(BUILD_TESTING)
     qt_add_resources(core_tests core_test_certificates PREFIX /tls FILES
         tests/certificates/root.pem tests/certificates/issuer.pem tests/certificates/leaf.pem tests/certificates/leaf.key)
     add_test(NAME core COMMAND core_tests)
+    add_test(NAME decoder_concurrency COMMAND core_tests parallelDecoderContexts)
+    set_tests_properties(decoder_concurrency PROPERTIES TIMEOUT 30)
     set_tests_properties(core PROPERTIES RESOURCE_LOCK aia_test_port ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 90)
+    if(NOT CMAKE_CROSSCOMPILING)
+        find_package(Python3 REQUIRED COMPONENTS Interpreter)
+        add_test(NAME capture_shutdown COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/capture_shutdown_test.py $<TARGET_FILE:qatention-capture>)
+        set_tests_properties(capture_shutdown PROPERTIES TIMEOUT 30)
+    endif()
     add_test(NAME decoder_cli COMMAND qatention-capture --check-native-decoder)
     add_test(NAME app_smoke COMMAND qatention --smoke-test)
     set_tests_properties(app_smoke PROPERTIES

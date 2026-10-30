@@ -63,14 +63,14 @@ QString replayVideoTrace(const QString& path, const QString& output)
     while (!file.atEnd()) {
         const auto line = file.readLine(Limit + 1);
         QJsonParseError error;
-        const auto doc = QJsonDocument::fromJson(line, &error);
-        if (error.error != QJsonParseError::NoError || !doc.isObject()) {
+        const auto document = QJsonDocument::fromJson(line, &error);
+        if (error.error != QJsonParseError::NoError || !document.isObject()) {
             throw Error("Invalid trace JSON");
         }
-        const auto e = doc.object();
-        const auto type = e["type"].toString();
+        const auto event = document.object();
+        const auto type = event["type"].toString();
         if (!header) {
-            if (type != "header" || e["version"].toInt() != 1) {
+            if (type != "header" || event["version"].toInt() != 1) {
                 throw Error("Unsupported trace header");
             }
             header = true;
@@ -83,7 +83,7 @@ QString replayVideoTrace(const QString& path, const QString& output)
         if (type != "video") {
             continue;
         }
-        const QSize size(e["width"].toInt(), e["height"].toInt());
+        const QSize size(event["width"].toInt(), event["height"].toInt());
         if (!decoder) {
             decoder = std::make_unique<Decoder>();
         }
@@ -91,18 +91,18 @@ QString replayVideoTrace(const QString& path, const QString& output)
             decoder->resize(size);
         }
         const auto packet = QByteArray::fromBase64Encoding(
-            e["payload"].toString().toLatin1(),
+            event["payload"].toString().toLatin1(),
             QByteArray::AbortOnBase64DecodingErrors);
         if (!packet) {
             throw Error("Invalid trace packet base64");
         }
-        decoder->decode(packet.decoded, quint32(e["encoding"].toDouble()));
+        decoder->decode(packet.decoded, quint32(event["encoding"].toDouble()));
         ++packets;
         lastImage = decoder->image();
-        if (e.contains("imageSha256")) {
+        if (event.contains("imageSha256")) {
             ++compared;
             if (imageHash(decoder->image()) !=
-                e["imageSha256"].toString().toLatin1())
+                event["imageSha256"].toString().toLatin1())
             {
                 ++mismatches;
             }

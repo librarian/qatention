@@ -69,6 +69,7 @@ static BYTE YAC_nr = 0, CbAC_nr = 1, CrAC_nr = 1; // AC Huffman table number for
 static SHORT DCY, DCCb, DCCr;  // Coeficientii DC pentru Y,Cb,Cr
 static SHORT DCT_coeff[384];   // Current DCT_coefficients
 static BYTE block_buf[768]; // temporary yuv buffer for each block
+static unsigned char* reference_blocks; // Valid 8x8 base blocks for second-pass updates.
 static struct YUV* yuv_buf;    // yuv buffer of whole frame For Pass2
 
 // compression parameters
@@ -108,7 +109,8 @@ static unsigned int height, width;
 static void InitBuffer()
 {
     //For 2Pass
-    yuv_buf = malloc((size_t)1920 * 1200 * 3);
+    yuv_buf = calloc((size_t)1920 * 1200, sizeof(*yuv_buf));
+    reference_blocks = calloc(240 * 150, 1);
 }
 
 static void InitColorTable()
@@ -575,6 +577,12 @@ static void MarkBlock(int mbx, int mby)
     if (i >= 0 && i < block_map_len) block_map[i] = 1;
 }
 
+// Unlike the IDCT lookup, RGB conversion can produce values below -256.
+static BYTE ClampColor(int value)
+{
+    return value < 0 ? 0 : value > 255 ? 255 : (BYTE)value;
+}
+
 static void YUVToRGB(
     int mbx, int mby,
     unsigned char* pYCbCr, //in, Y: 256 or 64 bytes; Cb: 64 bytes; Cr: 64 bytes
@@ -591,6 +599,7 @@ static void YUVToRGB(
 
     MarkBlock(mbx, mby);
     if (mode420 == 0) {
+        reference_blocks[mby * mbwidth + mbx] = 1;
         py = pYCbCr;
         pcb = pYCbCr + 64;
         pcr = pcb + 64;
@@ -612,9 +621,9 @@ static void YUVToRGB(
                 pYUV[n].Y = y;
                 pYUV[n].U = cb;
                 pYUV[n].V = cr;
-                pByte[n].B = rlimit_tbl[Y_tbl[y] + Cb2B_tbl[cb]];
-                pByte[n].G = rlimit_tbl[Y_tbl[y] + Cb2G_tbl[cb] + Cr2G_tbl[cr]];
-                pByte[n].R = rlimit_tbl[Y_tbl[y] + Cr2R_tbl[cr]];
+                pByte[n].B = ClampColor(Y_tbl[y] + Cb2B_tbl[cb]);
+                pByte[n].G = ClampColor(Y_tbl[y] + Cb2G_tbl[cb] + Cr2G_tbl[cr]);
+                pByte[n].R = ClampColor(Y_tbl[y] + Cr2R_tbl[cr]);
                 pByte[n].Reserved = 0xff;
             }
             pos += width;
@@ -638,9 +647,9 @@ static void YUVToRGB(
                 cb = pcb[m];
                 cr = pcr[m];
                 n = pos + i;
-                pByte[n].B = rlimit_tbl[Y_tbl[y] + Cb2B_tbl[cb]];
-                pByte[n].G = rlimit_tbl[Y_tbl[y] + Cb2G_tbl[cb] + Cr2G_tbl[cr]];
-                pByte[n].R = rlimit_tbl[Y_tbl[y] + Cr2R_tbl[cr]];
+                pByte[n].B = ClampColor(Y_tbl[y] + Cb2B_tbl[cb]);
+                pByte[n].G = ClampColor(Y_tbl[y] + Cb2G_tbl[cb] + Cr2G_tbl[cr]);
+                pByte[n].R = ClampColor(Y_tbl[y] + Cr2R_tbl[cr]);
                 pByte[n].Reserved = 0xff;
             }
             pos += width;
@@ -662,6 +671,7 @@ static void YUVToRGBPass2(
     WORD pixel_x, pixel_y;
     WORD tmp_x, tmp_y;
 
+    if (!reference_blocks[mby * mbwidth + mbx]) return;
     if (mode420) {
         pr_dbg("pass2 not supported in yuv420\n");
         return;
@@ -685,9 +695,9 @@ static void YUVToRGBPass2(
             y = (pYUV[n].Y += (py[m] - 128));
             cb = (pYUV[n].U += (pcb[m] - 128));
             cr = (pYUV[n].V += (pcr[m] - 128));
-            pByte[n].B = rlimit_tbl[Y_tbl[y] + Cb2B_tbl[cb]];
-            pByte[n].G = rlimit_tbl[Y_tbl[y] + Cb2G_tbl[cb] + Cr2G_tbl[cr]];
-            pByte[n].R = rlimit_tbl[Y_tbl[y] + Cr2R_tbl[cr]];
+            pByte[n].B = ClampColor(Y_tbl[y] + Cb2B_tbl[cb]);
+            pByte[n].G = ClampColor(Y_tbl[y] + Cb2G_tbl[cb] + Cr2G_tbl[cr]);
+            pByte[n].R = ClampColor(Y_tbl[y] + Cr2R_tbl[cr]);
             pByte[n].Reserved = 0xff;
         }
         pos += width;
@@ -750,17 +760,18 @@ static void InverseDCT(short* coef, BYTE* data, BYTE nBlock)
 #define FIX_1_847759065 ((int)473)
 #define FIX_2_613125930 ((int)669)
 
-#define MULTIPLY(var, cons) ((int)((var) * (cons)) >> 8)
+#define MULTIPLY(var, cons) (((var) * (int64_t)(cons)) >> 8)
 #define DCTSIZE 8
 
-    int tmp0, tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7;
-    int tmp10, tmp11, tmp12, tmp13;
-    int z5, z10, z11, z12, z13;
-    int workspace[64]; /* buffers data between passes */
+    // Wide intermediates are required even when input coefficients fit in SHORT.
+    int64_t tmp0, tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7;
+    int64_t tmp10, tmp11, tmp12, tmp13;
+    int64_t z5, z10, z11, z12, z13;
+    int64_t workspace[64]; /* buffers data between passes */
 
     short* inptr = coef;
     int32_t* quantptr = QT[nBlock];
-    int* wsptr = workspace;
+    int64_t* wsptr = workspace;
     unsigned char* outptr;
     unsigned char* r_limit = rlimit_tbl + 128;
     int i;
@@ -786,7 +797,7 @@ static void InverseDCT(short* coef, BYTE* data, BYTE nBlock)
                                  wsptr[DCTSIZE * 3] = wsptr[DCTSIZE * 4] =
                                  wsptr[DCTSIZE * 5] = wsptr[DCTSIZE * 6] =
                                  wsptr[DCTSIZE * 7] =
-                                 (inptr[DCTSIZE * 0] * quantptr[DCTSIZE * 0]) >> 16;
+                                 ((int64_t)inptr[DCTSIZE * 0] * quantptr[DCTSIZE * 0]) >> 16;
 
             inptr++; /* advance pointers to next column */
             quantptr++;
@@ -796,10 +807,10 @@ static void InverseDCT(short* coef, BYTE* data, BYTE nBlock)
 
         /* Even part */
 
-        tmp0 = (inptr[DCTSIZE * 0] * quantptr[DCTSIZE * 0]) >> 16;
-        tmp1 = (inptr[DCTSIZE * 2] * quantptr[DCTSIZE * 2]) >> 16;
-        tmp2 = (inptr[DCTSIZE * 4] * quantptr[DCTSIZE * 4]) >> 16;
-        tmp3 = (inptr[DCTSIZE * 6] * quantptr[DCTSIZE * 6]) >> 16;
+        tmp0 = ((int64_t)inptr[DCTSIZE * 0] * quantptr[DCTSIZE * 0]) >> 16;
+        tmp1 = ((int64_t)inptr[DCTSIZE * 2] * quantptr[DCTSIZE * 2]) >> 16;
+        tmp2 = ((int64_t)inptr[DCTSIZE * 4] * quantptr[DCTSIZE * 4]) >> 16;
+        tmp3 = ((int64_t)inptr[DCTSIZE * 6] * quantptr[DCTSIZE * 6]) >> 16;
 
         tmp10 = tmp0 + tmp2; /* phase 3 */
         tmp11 = tmp0 - tmp2;
@@ -814,10 +825,10 @@ static void InverseDCT(short* coef, BYTE* data, BYTE nBlock)
 
         /* Odd part */
 
-        tmp4 = (inptr[DCTSIZE * 1] * quantptr[DCTSIZE * 1]) >> 16;
-        tmp5 = (inptr[DCTSIZE * 3] * quantptr[DCTSIZE * 3]) >> 16;
-        tmp6 = (inptr[DCTSIZE * 5] * quantptr[DCTSIZE * 5]) >> 16;
-        tmp7 = (inptr[DCTSIZE * 7] * quantptr[DCTSIZE * 7]) >> 16;
+        tmp4 = ((int64_t)inptr[DCTSIZE * 1] * quantptr[DCTSIZE * 1]) >> 16;
+        tmp5 = ((int64_t)inptr[DCTSIZE * 3] * quantptr[DCTSIZE * 3]) >> 16;
+        tmp6 = ((int64_t)inptr[DCTSIZE * 5] * quantptr[DCTSIZE * 5]) >> 16;
+        tmp7 = ((int64_t)inptr[DCTSIZE * 7] * quantptr[DCTSIZE * 7]) >> 16;
 
         z13 = tmp6 + tmp5; /* phase 6 */
         z10 = tmp6 - tmp5;
@@ -855,7 +866,7 @@ static void InverseDCT(short* coef, BYTE* data, BYTE nBlock)
 
 //#define RANGE_MASK 1023; //2 bits wider than legal samples
 #define PASS1_BITS 0
-#define IDESCALE(x, n) ((int)((x) >> n))
+#define IDESCALE(x, n) ((x) >> n)
 
     wsptr = workspace;
     for (i = 0; i < DCTSIZE; i++) {
@@ -1030,6 +1041,9 @@ static void DecodeVqColors(struct ColorCache *vq, BYTE count)
 
 static void DecompressVq(int mbx, int mby, BYTE *out_buf, struct ColorCache *vq)
 {
+    // VQ encodes an 8x8 4:4:4 block. The 4:2:0 converter expects 384
+    // bytes, so an incompatible block must not reach it.
+    if (mode420) return;
     BYTE yuv[192];
     BYTE *p = yuv;
     int i;
@@ -1144,6 +1158,7 @@ ASPEED_EXPORT void aspeed_decode(uint32_t*, int, unsigned char*, int, int, unsig
 
 struct aspeed_ctx {
     struct YUV* yuv_buf;
+    unsigned char reference_blocks[240 * 150];
     int32_t QT[4][64];
     unsigned char selector;
     unsigned char advance_selector;
@@ -1154,7 +1169,7 @@ ASPEED_EXPORT void* aspeed_ctx_new(void)
 {
     struct aspeed_ctx* c = calloc(1, sizeof(*c));
     if (c == NULL) return NULL;
-    c->yuv_buf = malloc((size_t)1920 * 1200 * 3);
+    c->yuv_buf = calloc((size_t)1920 * 1200, sizeof(*c->yuv_buf));
     if (c->yuv_buf == NULL) { free(c); return NULL; }
     c->first_frame = 1;          /* force the quantisation tables to load on the first frame */
     return c;
@@ -1173,6 +1188,7 @@ ASPEED_EXPORT void aspeed_decode_ctx(void* ctx, uint32_t* _in_buf, int _len, uns
 {
     struct aspeed_ctx* c = (struct aspeed_ctx*)ctx;
     struct YUV* saved_yuv;
+    unsigned char* saved_reference_blocks = reference_blocks;
     unsigned char saved_sel, saved_adv, saved_first;
 
     if (c == NULL) {
@@ -1182,6 +1198,7 @@ ASPEED_EXPORT void aspeed_decode_ctx(void* ctx, uint32_t* _in_buf, int _len, uns
 
     /* swap this session's state in */
     saved_yuv = yuv_buf; saved_sel = selector; saved_adv = advance_selector; saved_first = first_frame;
+    reference_blocks = c->reference_blocks;
     yuv_buf = c->yuv_buf; selector = c->selector; advance_selector = c->advance_selector;
     first_frame = c->first_frame;
     memcpy(QT, c->QT, sizeof(QT));
@@ -1191,6 +1208,7 @@ ASPEED_EXPORT void aspeed_decode_ctx(void* ctx, uint32_t* _in_buf, int _len, uns
     /* and back out, keeping whatever the decode updated */
     c->selector = selector; c->advance_selector = advance_selector; c->first_frame = first_frame;
     memcpy(c->QT, QT, sizeof(QT));
+    reference_blocks = saved_reference_blocks;
     yuv_buf = saved_yuv; selector = saved_sel; advance_selector = saved_adv; first_frame = saved_first;
 }
 
@@ -1238,6 +1256,8 @@ ASPEED_EXPORT void aspeed_decode(uint32_t* _in_buf, int _len, unsigned char* _ou
     mode420 = _mode420;
 
     if (mode420) {
+        // A later 4:4:4 delta cannot use references from before a mode change.
+        memset(reference_blocks, 0, 240 * 150);
         mbwidth = ALIGN(width, 16) / 16;
         mbheight = ALIGN(height, 16) / 16;
     } else {

@@ -26,6 +26,11 @@ public:
     ~Session() override;
     void setKeepMedia(bool value);
 
+    bool logoutPending() const
+    {
+        return activeLogouts > 0 || !deferredLogouts.isEmpty();
+    }
+
     bool busy() const
     {
         return phase != Phase::Idle;
@@ -83,6 +88,7 @@ public:
 
     void pointer(int x, int y, int buttons);
 signals:
+    void logoutsFinished();
     void consoleCertificateUntrusted(
         const QString& host,
         quint16 port,
@@ -110,6 +116,7 @@ private:
         Messages
     };
     bool keepMedia = false;
+    int activeLogouts = 0;
     QList<std::function<void()>> deferredLogouts;
     Phase phase = Phase::Idle;
     QString statusText = "Disconnected", tlsFailure;
@@ -154,12 +161,19 @@ private:
     bool consumeMessage();
     void send(const QByteArray& bytes);
     void requestFrame();
+    enum class WebStep
+    {
+        Login,
+        ConsoleMenu,
+        ConfigureJava,
+        Launch
+    };
     void requestWeb(
         const QString& path,
         const QByteArray& body,
-        int step,
+        WebStep step,
         const QByteArray& csrf = {},
         bool chainRetried = false);
-    void handleWeb(const QByteArray& body, int step);
+    void handleWeb(const QByteArray& body, WebStep step);
 };
 }   // namespace aten

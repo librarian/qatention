@@ -394,3 +394,57 @@ Open **Menu** for:
 
 Pinch and drag continue to zoom and scroll the console. **Fit** returns from
 actual-size mode to fitting the available console area.
+
+### Sanitizer checks and protocol code
+
+Sanitizers are test builds, not release packaging options. On Linux with Clang
+and the usual Qt development dependencies:
+
+```sh
+cmake -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+  -DQATENTION_SANITIZER=address-undefined
+cmake --build build-asan --parallel 3
+ctest --test-dir build-asan --output-on-failure
+```
+
+Use `thread` in a separate build directory for TSan. `address` and `undefined`
+are also available separately. Add `-DQATENTION_MOBILE=ON` to run the mobile
+interface tests. The quality workflow runs ASan/UBSan for desktop and mobile.
+TSan runs the native corpus and the concurrent decoder-context regression:
+`ctest --test-dir build-tsan --output-on-failure -R '^(native_decoder|decoder_concurrency)$'`.
+This exercises separate decoder sessions through the production serialization
+wrapper. Full UI/network TSan runs currently report inside prebuilt Qt/glib;
+those dependencies need an instrumented build before we can establish full
+application race coverage. No race suppressions are applied. These builds
+instrument our C/C++ code; the downloaded Qt SDK itself is not instrumented.
+
+MSan requires instrumented dependencies. Running the ordinary application
+against the prebuilt Qt SDK would give misleading results, so the supported
+MSan target is the self-contained native decoder and its C test harness:
+
+```sh
+CC=clang CXX=clang++ cmake -S . -B build-msan -G Ninja \
+  -DQATENTION_NATIVE_TESTS_ONLY=ON -DQATENTION_SANITIZER=memory
+cmake --build build-msan --parallel 3
+ctest --test-dir build-msan --output-on-failure
+```
+
+The native tests include the reported malformed-packet regressions and a
+reproducible 10,000-packet mutation corpus. Sanitizer reports fail the checks;
+the tests do not ignore decoder errors. MSan does not cover Qt or UI code.
+See the [Clang MSan dependency requirements](https://clang.llvm.org/docs/MemorySanitizer.html#handling-external-code)
+for the requirements of a future fully instrumented application build.
+
+Protocol code is divided by responsibility:
+
+- `protocol.*`: console wire fields and messages.
+- `mediaprotocol.*`: ATEN media envelopes, USB command/status wrappers and attachment records.
+- `scsi.*`: read-only CD-ROM commands and responses.
+- `media.*`: connection, TLS and mounting lifecycle.
+
+Use descriptive names for packet buffers, offsets, lengths and command fields.
+Parse into ordinary structs with explicit endian helpers rather than casting
+wire bytes into packed structs. Document reserved fields, units and byte order.
+Vendor compatibility constants may remain byte sequences, but must have a name
+or surrounding comment explaining their purpose and which parts remain opaque.
+Prefer straightforward code over compact expressions or speculative optimizations.

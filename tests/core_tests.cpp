@@ -16,6 +16,9 @@
 #include <QtEndian>
 #include <QtTest>
 
+#include <atomic>
+#include <thread>
+
 using namespace aten;
 
 static QByteArray hermon(int w, int h, quint16 pixel)
@@ -120,6 +123,61 @@ class CoreTests: public QObject
 {
     Q_OBJECT
 private slots:
+
+    void parallelDecoderContexts()
+    {
+        // Exercise the actual C++ serialization boundary under TSan. Native
+        // globals must never be entered concurrently, even for separate
+        // sessions.
+        std::atomic<bool> failed = false;
+        auto decode = [&failed](bool white)
+        {
+            Decoder decoder;
+            decoder.resize({8, 8});
+            const auto packet = QByteArray::fromHex(
+                white ? "000001bc0000205300000000"
+                      : "000001bc0000205100000000");
+            for (int iteration = 0; iteration < 200; ++iteration) {
+                decoder.decode(packet, 0x57);
+                const auto expected =
+                    white ? qRgb(255, 255, 255) : qRgb(0, 0, 0);
+                if (decoder.image().pixel(0, 0) != expected) {
+                    failed = true;
+                }
+            }
+        };
+        std::thread first(decode, true), second(decode, false);
+        first.join();
+        second.join();
+        QVERIFY(!failed);
+    }
+
+    void boundedMediaParsing()
+    {
+        QVERIFY_EXCEPTION_THROWN(
+            MediaFrameHeader::parse(QByteArray(7, 0)),
+            Error);
+        QByteArray header(8, 0);
+        header[0] = 0x11;
+        putLittle32(header, 4, 30);
+        QVERIFY_EXCEPTION_THROWN(MediaFrameHeader::parse(header), Error);
+        putLittle32(header, 4, 31);
+        QCOMPARE(MediaFrameHeader::parse(header).payloadLength, quint32(31));
+        QByteArray command(31, 0);
+        command.replace(0, 4, "USBC");
+        command[14] = 10;
+        command[12] = char(0x80);
+        putLittle32(command, 4, 0x12345678);
+        putLittle32(command, 8, 2048);
+        const auto parsed = UsbCommandBlock::parse(command);
+        QCOMPARE(
+            parsed.status(1024, 0).toHex(),
+            QByteArray("55534253785634120004000000"));
+        QVERIFY_EXCEPTION_THROWN(parsed.status(2049, 0), Error);
+        command[14] = 17;
+        QVERIFY_EXCEPTION_THROWN(UsbCommandBlock::parse(command), Error);
+        QVERIFY_EXCEPTION_THROWN(little32(QByteArray(3, 0), 0), Error);
+    }
 
     void consoleCertificatePinning()
     {

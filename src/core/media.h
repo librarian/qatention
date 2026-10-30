@@ -1,5 +1,6 @@
 #pragma once
-#include "protocol.h"
+#include "mediaprotocol.h"
+#include "scsi.h"
 
 #include <QFile>
 #include <QObject>
@@ -8,33 +9,6 @@
 #include <QTimer>
 
 namespace aten {
-QByteArray mediaControl(quint32 type, const QByteArray& payload = {});
-QByteArray
-mediaAttach(const QString& user, const QString& password, quint32 stamp);
-
-struct ScsiResult
-{
-    QByteArray data;
-    quint8 status = 0;
-};
-
-class CdRom
-{
-public:
-    explicit CdRom(const QString& path);
-    ScsiResult execute(const QByteArray& cdb, quint32 allocation);
-
-    quint64 blocks() const
-    {
-        return (quint64(file.size()) + 2047) / 2048;
-    }
-
-private:
-    QFile file;
-    quint8 sense = 0, asc = 0;
-    ScsiResult fail(quint8 code);
-};
-
 class Media: public QObject
 {
     Q_OBJECT

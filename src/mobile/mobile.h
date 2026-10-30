@@ -91,6 +91,7 @@ public:
         bool remember);
     Q_INVOKABLE void disconnectSession();
     Q_INVOKABLE void trustConsole();
+    Q_INVOKABLE void forgetConsoleTrust(const QString& host);
 
     Q_INVOKABLE void rejectConsole()
     {

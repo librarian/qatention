@@ -111,3 +111,87 @@ jobs:
           build-mode: none
           queries: security-extended
       - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+
+  sanitizers:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [address-undefined, thread]
+        mobile: ['OFF', 'ON']
+        exclude:
+          - sanitizer: thread
+            mobile: 'ON'
+    env:
+      CC: clang-18
+      CXX: clang++-18
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+      TSAN_OPTIONS: halt_on_error=1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.release_sha || github.sha }}
+          fetch-depth: 0
+      - name: Validate release source
+        if: inputs.release_sha != ''
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          RELEASE_ID: ${{ inputs.release_id }}
+        run: python3 scripts/release_version.py check-source
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 libclang-rt-18-dev ninja-build libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libfontconfig1-dev libxcb-cursor0
+          # Clang 18's shadow-memory layout requires this on high-entropy hosts.
+          # This changes only the disposable CI runner, not installed applications.
+          sudo sysctl vm.mmap_rnd_bits=28
+      - uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
+        with:
+          version: '6.8.3'
+          arch: linux_gcc_64
+          cache: true
+      - name: Build instrumented application and tests
+        run: |
+          cmake -S . -B build-sanitized -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DQATENTION_SANITIZER=${{ matrix.sanitizer }} -DQATENTION_MOBILE=${{ matrix.mobile }}
+          cmake --build build-sanitized --parallel 3
+      - name: Run sanitizer regressions
+        run: |
+          if [ "${{ matrix.sanitizer }}" = thread ]; then
+            # Prebuilt Qt/glib omit synchronization instrumentation. Exercise
+            # the shared native decoder through our real per-session wrapper.
+            ctest --test-dir build-sanitized --output-on-failure -R '^(native_decoder|decoder_concurrency)$'
+          else
+            ctest --test-dir build-sanitized --output-on-failure
+          fi
+
+  memory-sanitizer:
+    runs-on: ubuntu-24.04
+    env:
+      CC: clang-18
+      CXX: clang++-18
+      MSAN_OPTIONS: halt_on_error=1:print_stats=1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.release_sha || github.sha }}
+          fetch-depth: 0
+      - name: Validate release source
+        if: inputs.release_sha != ''
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          RELEASE_ID: ${{ inputs.release_id }}
+        run: python3 scripts/release_version.py check-source
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 libclang-rt-18-dev ninja-build
+          sudo sysctl vm.mmap_rnd_bits=28
+      - name: Build fully instrumented native decoder tests
+        run: |
+          # Prebuilt Qt is not MSan-instrumented; do not claim coverage for it.
+          cmake -S . -B build-msan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DQATENTION_NATIVE_TESTS_ONLY=ON -DQATENTION_SANITIZER=memory
+          cmake --build build-msan --parallel 3
+          ctest --test-dir build-msan --output-on-failure

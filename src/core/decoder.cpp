@@ -1,5 +1,6 @@
 #include "decoder.h"
 
+#include "aspeed.h"
 #include "protocol.h"
 
 #include <QtEndian>
@@ -7,24 +8,6 @@
 #include <cstring>
 #include <mutex>
 #include <vector>
-
-extern "C" {
-void aspeed_init(void);
-void* aspeed_ctx_new(void);
-void aspeed_ctx_free(void*);
-void aspeed_decode_ctx_map(
-    void*,
-    uint32_t*,
-    int,
-    unsigned char*,
-    int,
-    int,
-    unsigned,
-    unsigned,
-    unsigned,
-    unsigned char*,
-    int);
-}
 
 namespace aten {
 static std::mutex nativeMutex;
@@ -58,22 +41,27 @@ void Decoder::resize(QSize size)
     frame.fill(Qt::black);
 }
 
-static QRgb rgb555(const char* p)
+static QRgb rgb555(const char* bytes)
 {
-    const auto v = quint32(quint8(p[0])) | (quint32(quint8(p[1])) << 8U);
+    const auto pixel =
+        quint32(quint8(bytes[0])) | (quint32(quint8(bytes[1])) << 8U);
     return qRgb(
-        ((v >> 10U) & 31U) << 3U,
-        ((v >> 5U) & 31U) << 3U,
-        (v & 31U) << 3U);
+        ((pixel >> 10U) & 31U) << 3U,
+        ((pixel >> 5U) & 31U) << 3U,
+        (pixel & 31U) << 3U);
 }
 
-bool Decoder::decode(const QByteArray& p, quint32 encoding)
+bool Decoder::decode(const QByteArray& packet, quint32 encoding)
 {
     if (encoding == 0x57) {
-        if (p.size() < 12 || quint8(p[0]) > 11 || quint8(p[1]) > 11) {
+        // ASPEED packet: quality[1], advanced quality[1], BE16 chroma marker,
+        // followed by the native word-oriented compressed stream.
+        if (packet.size() < 12 || quint8(packet[0]) > 11 ||
+            quint8(packet[1]) > 11)
+        {
             throw Error("Invalid ASPEED header");
         }
-        auto marker = be16(p, 2);
+        auto marker = be16(packet, 2);
         if (marker != 0x1a6 && marker != 0x1bc) {
             throw Error("Unknown ASPEED chroma mode");
         }
@@ -82,12 +70,15 @@ bool Decoder::decode(const QByteArray& p, quint32 encoding)
         }
         // Native input is uint32_t*: provide aligned storage, including zero
         // padding for partial words.
-        std::vector<uint32_t> words(size_t((p.size() - 4 + 3) / 4), 0);
-        std::memcpy(words.data(), p.constData() + 4, size_t(p.size() - 4));
-        const int block = marker == 0x1a6 ? 16 : 8;
-        QByteArray map(
-            ((qsizetype(frame.width()) + block - 1) / block) *
-                ((frame.height() + block - 1) / block),
+        std::vector<uint32_t> words(size_t((packet.size() - 4 + 3) / 4), 0);
+        std::memcpy(
+            words.data(),
+            packet.constData() + 4,
+            size_t(packet.size() - 4));
+        const int blockSize = marker == 0x1a6 ? 16 : 8;
+        QByteArray changedBlocks(
+            ((qsizetype(frame.width()) + blockSize - 1) / blockSize) *
+                ((frame.height() + blockSize - 1) / blockSize),
             0);
         std::lock_guard lock(nativeMutex);
         std::call_once(initialized, aspeed_init);
@@ -100,122 +91,138 @@ bool Decoder::decode(const QByteArray& p, quint32 encoding)
         aspeed_decode_ctx_map(
             context,
             words.data(),
-            int(p.size() - 4),
+            int(packet.size() - 4),
             frame.bits(),
             frame.width(),
             frame.height(),
             marker == 0x1a6,
-            quint8(p[0]),
-            quint8(p[1]),
-            reinterpret_cast<unsigned char*>(map.data()),
-            int(map.size()));
-        return map.contains(char(1));
+            quint8(packet[0]),
+            quint8(packet[1]),
+            reinterpret_cast<unsigned char*>(changedBlocks.data()),
+            int(changedBlocks.size()));
+        return changedBlocks.contains(char(1));
     }
-    if (p.size() < 10) {
+    if (packet.size() < 10) {
         throw Error("Truncated ATEN header");
     }
-    if (p[1] != 0) {
-        return decodePlanes(p);
+    // Legacy ATEN header (10 bytes): frame kind, encoding type, then
+    // type-specific fields. Type zero is Hermon RGB555; others use planes.
+    if (packet[1] != 0) {
+        return decodePlanes(packet);
     }
-    if (p[0] == 1) {
-        if (p.size() - 10 < qsizetype(frame.width()) * frame.height() * 2) {
+    if (packet[0] == 1) {
+        if (packet.size() - 10 < qsizetype(frame.width()) * frame.height() * 2)
+        {
             throw Error("Truncated Hermon keyframe");
         }
         for (int y = 0; y < frame.height(); ++y) {
             auto* row = reinterpret_cast<QRgb*>(frame.scanLine(y));
             for (int x = 0; x < frame.width(); ++x) {
-                row[x] =
-                    rgb555(p.constData() + 10 + 2LL * (y * frame.width() + x));
+                row[x] = rgb555(
+                    packet.constData() + 10 + 2LL * (y * frame.width() + x));
             }
         }
         return true;
     }
-    const auto count = be32(p, 2);
-    if (count > quint32((p.size() - 10) / 518)) {
+    // Hermon delta: BE32 tile count in the header. Each 518-byte tile has
+    // four reserved bytes, row/column in 16-pixel units, then 256 LE RGB555
+    // pixels.
+    const auto tileCount = be32(packet, 2);
+    if (tileCount > quint32((packet.size() - 10) / 518)) {
         throw Error("Truncated Hermon tile update");
     }
-    for (quint32 t = 0; t < count; ++t) {
-        auto pos = 10 + qsizetype(t) * 518;
-        int top = quint8(p[pos + 4]) * 16, left = quint8(p[pos + 5]) * 16;
+    for (quint32 tileIndex = 0; tileIndex < tileCount; ++tileIndex) {
+        auto tileOffset = 10 + qsizetype(tileIndex) * 518;
+        int top = quint8(packet[tileOffset + 4]) * 16,
+            left = quint8(packet[tileOffset + 5]) * 16;
         for (int y = 0; y < 16 && y + top < frame.height(); ++y) {
             auto* row = reinterpret_cast<QRgb*>(frame.scanLine(top + y));
             for (int x = 0; x < 16 && x + left < frame.width(); ++x) {
-                row[left + x] =
-                    rgb555(p.constData() + pos + 6 + 2LL * (y * 16 + x));
+                row[left + x] = rgb555(
+                    packet.constData() + tileOffset + 6 + 2LL * (y * 16 + x));
             }
         }
     }
-    return count != 0;
+    return tileCount != 0;
 }
 }   // namespace aten
 
 namespace aten {
 static QByteArray expandRle(const QByteArray& input, int size)
 {
-    QByteArray out(size, 0);
-    qsizetype pos = 0, dest = 0;
+    QByteArray output(size, 0);
+    qsizetype inputOffset = 0, outputOffset = 0;
     auto write = [&](char value, int count)
     {
-        if (count > out.size() - dest) {
+        if (count > output.size() - outputOffset) {
             throw Error("RLE output exceeds frame");
         }
-        std::memset(out.data() + dest, quint8(value), size_t(count));
-        dest += count;
+        std::memset(output.data() + outputOffset, quint8(value), size_t(count));
+        outputOffset += count;
     };
-    while (pos < input.size()) {
-        pos = ((pos + 3) / 4) * 4;
-        if (pos == input.size()) {
+    // Chunks begin on four-byte boundaries with a LE32 encoded byte count.
+    // 0x55 introduces an escape/run; 0xaa repeats the next byte three times.
+    while (inputOffset < input.size()) {
+        inputOffset = ((inputOffset + 3) / 4) * 4;
+        if (inputOffset == input.size()) {
             break;
         }
-        if (input.size() - pos < 4) {
+        if (input.size() - inputOffset < 4) {
             throw Error("Truncated RLE chunk header");
         }
-        const auto n = qFromLittleEndian<quint32>(input.constData() + pos);
-        pos += 4;
-        if (n > input.size() - pos) {
+        const auto chunkLength =
+            qFromLittleEndian<quint32>(input.constData() + inputOffset);
+        inputOffset += 4;
+        if (chunkLength > input.size() - inputOffset) {
             throw Error("Truncated RLE chunk");
         }
-        const qsizetype end = pos + n;
-        while (pos < end) {
-            const auto lead = quint8(input[pos++]);
-            if (pos == end) {
+        const qsizetype chunkEnd = inputOffset + chunkLength;
+        while (inputOffset < chunkEnd) {
+            const auto lead = quint8(input[inputOffset++]);
+            if (inputOffset == chunkEnd) {
                 write(char(lead), 1);
                 continue;
             }
             if (lead == 0x55) {
-                const auto count = quint8(input[pos++]);
+                const auto count = quint8(input[inputOffset++]);
                 if (count <= 1) {
                     write(count == 0 ? char(0x55) : char(0xaa), 1);
                 } else {
-                    if (pos == end) {
+                    if (inputOffset == chunkEnd) {
                         throw Error("Truncated RLE run");
                     }
-                    write(input[pos++], count + 1);
+                    write(input[inputOffset++], count + 1);
                 }
             } else if (lead == 0xaa) {
-                write(input[pos++], 3);
+                write(input[inputOffset++], 3);
             } else {
                 write(char(lead), 1);
             }
         }
     }
     // Zero the unwritten tail rather than reusing pixels from an earlier frame.
-    return out;
+    return output;
 }
 
-static QRgb
-planePixel(const QByteArray& planes, int base, int pixels, int n, bool type4)
+static QRgb planePixel(
+    const QByteArray& planes,
+    int base,
+    int pixels,
+    int pixelIndex,
+    bool type4)
 {
     const int stride = (pixels + 7) / 8;
     auto assemble = [&](int group)
     {
-        quint32 v = 0;
-        for (int k = 0; k < 8; ++k) {
-            const int index = base + (group + 7 - k) * stride + n / 8;
+        quint32 channelValue = 0;
+        for (int bit = 0; bit < 8; ++bit) {
+            const int index =
+                base + (group + 7 - bit) * stride + pixelIndex / 8;
             const quint32 packed = quint8(planes[index]);
-            v |= ((packed >> unsigned(n % 8)) & 1U) << unsigned(k);
+            channelValue |= ((packed >> unsigned(pixelIndex % 8)) & 1U)
+                            << unsigned(bit);
         }
-        return v;
+        return channelValue;
     };
     if (type4) {
         return qRgb(assemble(24), assemble(0), assemble(8));
@@ -229,33 +236,38 @@ planePixel(const QByteArray& planes, int base, int pixels, int n, bool type4)
         (low << 3U) & 255U);
 }
 
-bool Decoder::decodePlanes(const QByteArray& p)
+bool Decoder::decodePlanes(const QByteArray& packet)
 {
-    const int type = quint8(p[1]), subtype = quint8(p[2]);
+    // Plane header: frame kind[1], type[1], subtype[1], reserved[3],
+    // BE32 total record length. Selected types carry a 256-entry BGRA palette.
+    const int type = quint8(packet[1]), subtype = quint8(packet[2]);
     const bool hasPalette = (type == 1 && subtype == 0) || type == 5;
     const int offset = hasPalette ? 1034 : 10;
-    const quint32 total = be32(p, 6);
-    if (total < quint32(offset) || total > quint32(p.size())) {
+    const quint32 total = be32(packet, 6);
+    if (total < quint32(offset) || total > quint32(packet.size())) {
         throw Error("Invalid video payload length");
     }
     if (hasPalette) {
-        palette = p.mid(10, 1024);
+        palette = packet.mid(10, 1024);
     }
-    const auto payload = p.mid(offset, total - offset);
+    const auto payload = packet.mid(offset, total - offset);
     const int pixels = frame.width() * frame.height();
-    if (p[0] == 1) {
+    if (packet[0] == 1) {
         if (subtype == 2 || (subtype == 0 && type == 1)) {
             const bool nibble = subtype == 2;
             if (payload.size() < (pixels + (nibble ? 1 : 0)) / (nibble ? 2 : 1))
             {
                 throw Error("Truncated palette frame");
             }
-            for (int n = 0; n < pixels; ++n) {
-                const auto v = quint32(quint8(payload[n / (nibble ? 2 : 1)]));
+            for (int pixelIndex = 0; pixelIndex < pixels; ++pixelIndex) {
+                const auto packedIndex =
+                    quint32(quint8(payload[pixelIndex / (nibble ? 2 : 1)]));
                 const int index =
-                    nibble ? ((v >> unsigned((n % 2) * 4)) & 15U) : v;
-                reinterpret_cast<QRgb*>(
-                    frame.scanLine(n / frame.width()))[n % frame.width()] =
+                    nibble ? ((packedIndex >> unsigned((pixelIndex % 2) * 4)) &
+                              15U)
+                           : packedIndex;
+                reinterpret_cast<QRgb*>(frame.scanLine(
+                    pixelIndex / frame.width()))[pixelIndex % frame.width()] =
                     qRgb(
                         quint8(palette[index * 4 + 2]),
                         quint8(palette[index * 4 + 1]),
@@ -268,10 +280,10 @@ bool Decoder::decodePlanes(const QByteArray& p)
         }
         const auto planes =
             expandRle(payload, (type == 4 ? 32 : 16) * ((pixels + 7) / 8));
-        for (int n = 0; n < pixels; ++n) {
-            reinterpret_cast<QRgb*>(
-                frame.scanLine(n / frame.width()))[n % frame.width()] =
-                planePixel(planes, 0, pixels, n, type == 4);
+        for (int pixelIndex = 0; pixelIndex < pixels; ++pixelIndex) {
+            reinterpret_cast<QRgb*>(frame.scanLine(
+                pixelIndex / frame.width()))[pixelIndex % frame.width()] =
+                planePixel(planes, 0, pixels, pixelIndex, type == 4);
         }
         return true;
     }
@@ -281,6 +293,8 @@ bool Decoder::decodePlanes(const QByteArray& p)
     if (payload.size() < 4) {
         throw Error("Truncated tile table");
     }
+    // Delta payload: LE16 tile count, {y,x,width,height} byte descriptors,
+    // two padding bytes, then the RLE-compressed planes for all tiles.
     const int count = qFromLittleEndian<quint16>(payload.constData()),
               start = count * 4 + 4;
     if (start > payload.size()) {
@@ -288,29 +302,36 @@ bool Decoder::decodePlanes(const QByteArray& p)
     }
     int totalPlanes = 0;
     const int planeSlots = type == 4 ? 32 : 16;
-    for (int t = 0; t < count; ++t) {
-        const int at = 2 + t * 4, w = quint8(payload[at + 2]),
-                  h = quint8(payload[at + 3]);
-        const int bytes = planeSlots * ((w * h + 7) / 8);
+    for (int tileIndex = 0; tileIndex < count; ++tileIndex) {
+        const int descriptorOffset = 2 + tileIndex * 4,
+                  width = quint8(payload[descriptorOffset + 2]),
+                  height = quint8(payload[descriptorOffset + 3]);
+        const int bytes = planeSlots * ((width * height + 7) / 8);
         if (totalPlanes > 64LL * 1024 * 1024 - bytes) {
             throw Error("Tile expansion limit exceeded");
         }
         totalPlanes += bytes;
     }
     const auto planes = expandRle(payload.mid(start), totalPlanes);
-    int pos = 0;
-    for (int t = 0; t < count; ++t) {
-        const int at = 2 + t * 4, y = quint8(payload[at]),
-                  x = quint8(payload[at + 1]), w = quint8(payload[at + 2]),
-                  h = quint8(payload[at + 3]);
-        for (int row = 0; row < h && y + row < frame.height(); ++row) {
+    int planeOffset = 0;
+    for (int tileIndex = 0; tileIndex < count; ++tileIndex) {
+        const int descriptorOffset = 2 + tileIndex * 4,
+                  y = quint8(payload[descriptorOffset]),
+                  x = quint8(payload[descriptorOffset + 1]),
+                  width = quint8(payload[descriptorOffset + 2]),
+                  height = quint8(payload[descriptorOffset + 3]);
+        for (int row = 0; row < height && y + row < frame.height(); ++row) {
             auto* line = reinterpret_cast<QRgb*>(frame.scanLine(y + row));
-            for (int col = 0; col < w && x + col < frame.width(); ++col) {
-                line[x + col] =
-                    planePixel(planes, pos, w * h, row * w + col, type == 4);
+            for (int col = 0; col < width && x + col < frame.width(); ++col) {
+                line[x + col] = planePixel(
+                    planes,
+                    planeOffset,
+                    width * height,
+                    row * width + col,
+                    type == 4);
             }
         }
-        pos += planeSlots * ((w * h + 7) / 8);
+        planeOffset += planeSlots * ((width * height + 7) / 8);
     }
     return count > 0;
 }
