@@ -51,21 +51,36 @@ def api(endpoint):
     return json.loads(subprocess.check_output(['gh', 'api', endpoint]))
 
 
-def prepare(tag, sha, directory):
+def prepare(tag, sha, directory, sources=None):
     validate_inputs(tag, sha)
     repo = os.environ['GITHUB_REPOSITORY']
     files, run_ids = {}, {}
+    # Require the embedded version before promoting any artifacts.
+    version = subprocess.check_output(['git', 'show', f'{sha}:VERSION'], text=True).strip()
+    if version != tag.removeprefix('v'):
+        raise ValueError('Release tag does not match the source VERSION')
+    if sources and sources['commit'] != sha:
+        raise ValueError('Release builds belong to a different commit')
     for workflow, (key, names) in WORKFLOWS.items():
-        runs = api(f'repos/{repo}/actions/workflows/{workflow}/runs'
-                   f'?head_sha={sha}&branch=main&event=push&per_page=100')['workflow_runs']
-        run_id = select_run(runs, sha)
+        if sources:
+            from release_version import matching_run
+            run = api(f"repos/{repo}/actions/runs/{sources['runs'][workflow]}")
+            if run.get('path') != f'.github/workflows/{workflow}':
+                raise ValueError('Source run belongs to a different workflow')
+            run_id = matching_run([run], sha, sources['request'])
+            if run_id is None:
+                raise ValueError('Release build is not complete or does not match the request')
+        else:
+            runs = api(f'repos/{repo}/actions/workflows/{workflow}/runs'
+                       f'?head_sha={sha}&branch=main&event=push&per_page=100')['workflow_runs']
+            run_id = select_run(runs, sha)
         run_ids[key] = run_id
         if names:
             artifacts = api(f'repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100')['artifacts']
             files.update(select_artifacts(artifacts, names))
     directory.mkdir(parents=True, exist_ok=True)
     (directory / 'release-source.json').write_text(json.dumps(
-        {'tag': tag, 'commit': sha, 'runs': run_ids, 'files': files}, indent=2) + '\n')
+        {'tag': tag, 'version': version, 'commit': sha, 'runs': run_ids, 'files': files}, indent=2) + '\n')
     with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
         for key, run_id in run_ids.items():
             output.write(f'{key}={run_id}\n')
@@ -91,6 +106,7 @@ if __name__ == '__main__':
     parser.add_argument('--directory', type=Path, default=Path('release-assets'))
     args = parser.parse_args()
     if args.mode == 'prepare':
-        prepare(os.environ['RELEASE_TAG'], os.environ['RELEASE_SHA'], args.directory)
+        sources = json.loads(Path('release-runs.json').read_text())
+        prepare(os.environ['RELEASE_TAG'], os.environ['RELEASE_SHA'], args.directory, sources)
     else:
         verify(args.directory)

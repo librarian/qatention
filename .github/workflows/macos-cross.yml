@@ -1,15 +1,23 @@
 name: macOS cross-builds
+run-name: ${{ inputs.release_sha && format('Release {0} ({1})', inputs.release_sha, inputs.release_id) || '' }}
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_sha:
+        description: 'Release preparation only: exact main commit to build'
+        type: string
+      release_id:
+        description: 'Release preparation only: correlation ID'
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: macos-cross-${{ github.ref }}
+  group: macos-cross-${{ inputs.release_id || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -21,6 +29,15 @@ jobs:
         arch: [arm64, x86_64]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.release_sha || github.sha }}
+          fetch-depth: 0
+      - name: Validate release source
+        if: inputs.release_sha != ''
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          RELEASE_ID: ${{ inputs.release_id }}
+        run: python3 scripts/release_version.py check-source
       - name: Cross-build dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y ninja-build clang-18 llvm-18 lld-18 make patch xz-utils bzip2 cpio libgl1-mesa-dev libxkbcommon-dev

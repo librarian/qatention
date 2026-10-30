@@ -62,7 +62,7 @@ int main(int argc, char** argv)
 {
     QCoreApplication app(argc, argv);
     app.setApplicationName("qatention-capture");
-    app.setApplicationVersion("0.2.0");
+    app.setApplicationVersion(QATENTION_VERSION);
 #ifdef Q_OS_MACOS
     // The secondary executable may not be recognized as the app's main bundle.
     QCoreApplication::addLibraryPath(

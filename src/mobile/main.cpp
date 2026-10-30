@@ -14,6 +14,7 @@ int main(int argc, char** argv)
     qputenv("ANDROID_OPENSSL_SUFFIX", "_3");
 #endif
     QGuiApplication app(argc, argv);
+    app.setApplicationVersion(QATENTION_VERSION);
     app.setOrganizationName("qatention");
     app.setApplicationName("QATENtion Android");
     QQuickStyle::setStyle("Material");

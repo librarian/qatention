@@ -347,22 +347,34 @@ and scripts.
 ## Releases
 
 **Prepare draft release** is manual-only and is not triggered by pushes or tags.
-Once Desktop builds, macOS cross-builds, Android preview and Code quality have
-all succeeded for the same `main` push commit, select **Run workflow** on `main`,
-provide its full commit SHA and a tag such as `v0.2.0-preview.3`.
+Select **Run workflow** on `main` and enter a new tag such as `v0.4.0` or
+`v0.4.0-rc.1`. No commit SHA is needed.
 
-The workflow verifies the source runs, downloads the five existing artifacts,
-checks their original SHA256 digests and creates a **draft** release with
-`SHA256SUMS` and `release-source.json` recording provenance. It never rebuilds or
-re-signs the APK, so Android version codes and the persistent signing identity
-are preserved. Missing/expired artifacts or failed checks stop the release.
-Review and publish the draft explicitly in GitHub Releases after device testing.
+Preparation updates the shared `VERSION` file on `main`, commits it, and
+explicitly dispatches Desktop builds, macOS cross-builds, Android preview and
+Code quality for that exact commit. Normal main pushes do not cancel these
+release builds. A failed or cancelled build stops preparation; nothing is
+published. A concurrent main update can reject the version push safely; retry
+preparation in that case. Repository rules must allow the workflow token to
+push this version commit.
 
-This is artifact promotion: release tags do not change embedded application
-versions. Update CMake/application version metadata before building when needed;
-Android remains named `preview` until it is ready for a stable release. macOS
-bundles remain ad-hoc signed, not notarized. Release setup does not itself create
-a tag or release.
+`VERSION` supplies the desktop/CLI application version, Android version name
+and macOS numeric bundle version. Android's numeric version code still comes
+from the Android workflow run counter and retains its persistent signing identity.
+Prerelease suffixes are retained in application/Android versions; macOS bundle
+metadata uses the numeric part. The version already inside a published binary
+is never changed by editing a release tag.
+
+Once all four workflows pass, preparation downloads their five artifacts,
+verifies their original SHA256 digests, and creates a **draft** with
+`SHA256SUMS` and `release-source.json` recording provenance. Tags with a
+suffix are marked prerelease; plain `vX.Y.Z` tags are not. Review and publish
+the draft explicitly after device testing. Existing tags are rejected.
+If preparation fails before a tag is created, rerunning with the same tag
+reuses the version commit where possible and builds again.
+
+The APK filename retains `preview` for compatibility; its embedded version
+matches `VERSION`. macOS bundles remain ad-hoc signed, not notarized.
 
 ### Android session controls
 

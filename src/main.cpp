@@ -12,7 +12,7 @@ int main(int argc, char** argv)
     QApplication app(argc, argv);
     QCoreApplication::setApplicationName("QATENtion");
     QCoreApplication::setOrganizationName("qatention");
-    QCoreApplication::setApplicationVersion("0.2.0");
+    QCoreApplication::setApplicationVersion(QATENTION_VERSION);
     const bool smoke = app.arguments().contains("--smoke-test");
     aten::Profiles profiles(
         QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) +

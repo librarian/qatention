@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.24)
-project(qatention VERSION 0.2.0 LANGUAGES C CXX)
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" QATENTION_VERSION LIMIT_COUNT 1)
+if(NOT QATENTION_VERSION MATCHES "^([0-9]+)[.]([0-9]+)[.]([0-9]+)(-[A-Za-z0-9][A-Za-z0-9.-]*)?$")
+    message(FATAL_ERROR "Invalid VERSION")
+endif()
+set(QATENTION_NUMERIC_VERSION "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}")
+project(qatention VERSION ${QATENTION_NUMERIC_VERSION} LANGUAGES C CXX)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -25,6 +31,7 @@ add_library(qatention_core STATIC
     src/core/media.cpp src/core/media.h
     src/core/videotrace.cpp src/core/videotrace.h)
 target_include_directories(qatention_core PUBLIC src)
+target_compile_definitions(qatention_core PUBLIC QATENTION_VERSION="${QATENTION_VERSION}")
 target_link_libraries(qatention_core PUBLIC Qt6::Core Qt6::Gui Qt6::Network PRIVATE aspeed)
 if(WIN32)
     target_link_libraries(qatention_core PRIVATE crypt32)
@@ -52,7 +59,7 @@ if(ANDROID OR QATENTION_MOBILE)
             QT_ANDROID_MIN_SDK_VERSION 28
             QT_ANDROID_TARGET_SDK_VERSION 35
             QT_ANDROID_VERSION_CODE ${QATENTION_ANDROID_VERSION_CODE}
-            QT_ANDROID_VERSION_NAME "0.2.0-preview2"
+            QT_ANDROID_VERSION_NAME "${QATENTION_VERSION}"
             QT_ANDROID_EXTRA_LIBS "${ANDROID_OPENSSL_DIR}/libcrypto_3.so;${ANDROID_OPENSSL_DIR}/libssl_3.so")
     endif()
     if(NOT ANDROID)

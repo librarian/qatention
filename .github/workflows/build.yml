@@ -1,15 +1,23 @@
 name: Desktop builds
+run-name: ${{ inputs.release_sha && format('Release {0} ({1})', inputs.release_sha, inputs.release_id) || '' }}
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_sha:
+        description: 'Release preparation only: exact main commit to build'
+        type: string
+      release_id:
+        description: 'Release preparation only: correlation ID'
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: desktop-${{ github.ref }}
+  group: desktop-${{ inputs.release_id || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -26,6 +34,15 @@ jobs:
       WINEPREFIX: ${{ github.workspace }}/wine-prefix
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.release_sha || github.sha }}
+          fetch-depth: 0
+      - name: Validate release source
+        if: inputs.release_sha != ''
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          RELEASE_ID: ${{ inputs.release_id }}
+        run: python3 scripts/release_version.py check-source
       - name: Linux build dependencies
         run: sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libfontconfig1-dev libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-image0 libxcb-render-util0
       - name: Windows cross-build dependencies
