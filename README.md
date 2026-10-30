@@ -41,8 +41,7 @@ cmake --install build --prefix "$PWD/dist"
 
 Use the Qt `macos` directory on macOS, or `msvc2022_64` on Windows. On Windows run
 from an x64 Visual Studio developer shell with LLVM available, and configure with
-`-DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl`. The vendor C decoder
-uses GNU-style variadic macros accepted by Clang; it is compiled as C, not C++.
+`-DCMAKE_CXX_COMPILER=clang-cl`. The application and ASPEED decoder are C++17.
 
 Linux build prerequisites on Ubuntu/Debian:
 
@@ -174,7 +173,7 @@ and the installed UI/TLS smoke test. CI caches the Windows SDK and OpenSSL build
 - src/core: asynchronous Qt Network sessions, video decoding, profiles and media.
 - src/ui: native Qt Widgets menus, tabs, dialogs and console rendering/input.
 - src/capture.cpp: command-line capture and media client.
-- third_party/aspeed: MPL-2.0 C decoder, linked statically.
+- third_party/aspeed: MPL-2.0 C++ decoder, linked statically.
 - tests: protocol vectors, mock BMC, SCSI/media, decoder, profile and UI checks.
 
 The ASPEED decoder remains C with a C++ ownership wrapper. No .NET runtime or
@@ -316,10 +315,10 @@ build-mobile/qatention
 
 ## Code style and analysis
 
-First-party C++ (`src/` and `tests/`) follows the
+Maintained C++ (`src/`, `tests/`, and `third_party/aspeed/`) follows the
 [NBS clang-format style](https://github.com/ydb-platform/nbs/blob/main/.clang-format),
-with Qt macros and local include groups. Use **clang-format 23.1.3** and **clang-tidy 23.1.4**; vendored
-`third_party/` sources and generated files are excluded. Existing Qt-style names
+with Qt macros and local include groups. Use **clang-format 23.1.3** and **clang-tidy 23.1.4**;
+other third-party sources and generated files are excluded. Existing Qt-style names
 are retained. QML, JavaScript and Java are outside the C++ formatting check.
 
 ```sh
@@ -412,15 +411,14 @@ are also available separately. Add `-DQATENTION_MOBILE=ON` to run the mobile
 interface tests. The quality workflow runs ASan/UBSan for desktop and mobile.
 TSan runs the native corpus and the concurrent decoder-context regression:
 `ctest --test-dir build-tsan --output-on-failure -R '^(native_decoder|decoder_concurrency)$'`.
-This exercises separate decoder sessions through the production serialization
-wrapper. Full UI/network TSan runs currently report inside prebuilt Qt/glib;
+This exercises separate decoder sessions through the production Qt adapter. Full UI/network TSan runs currently report inside prebuilt Qt/glib;
 those dependencies need an instrumented build before we can establish full
 application race coverage. No race suppressions are applied. These builds
 instrument our C/C++ code; the downloaded Qt SDK itself is not instrumented.
 
 MSan requires instrumented dependencies. Running the ordinary application
 against the prebuilt Qt SDK would give misleading results, so the supported
-MSan target is the self-contained native decoder and its C test harness:
+MSan target is the self-contained native decoder and its C++ test harness:
 
 ```sh
 CC=clang CXX=clang++ cmake -S . -B build-msan -G Ninja \
@@ -429,8 +427,12 @@ cmake --build build-msan --parallel 3
 ctest --test-dir build-msan --output-on-failure
 ```
 
-The native tests include the reported malformed-packet regressions and a
-reproducible 10,000-packet mutation corpus. Sanitizer reports fail the checks;
+The native tests include malformed-packet and buffer-boundary regressions, a
+reproducible 10,000-packet mutation corpus with an output fingerprint recorded
+from the previous C implementation, and simultaneous independent sessions.
+The codec has no Qt dependency or mutable process-wide decoding state. Each
+`aspeed::Decoder` owns its buffers and tables; callers must serialize access to
+the same instance, while separate instances can decode concurrently. Sanitizer reports fail the checks;
 the tests do not ignore decoder errors. MSan does not cover Qt or UI code.
 See the [Clang MSan dependency requirements](https://clang.llvm.org/docs/MemorySanitizer.html#handling-external-code)
 for the requirements of a future fully instrumented application build.

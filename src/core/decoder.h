@@ -4,6 +4,10 @@
 
 #include <memory>
 
+namespace aspeed {
+class Decoder;
+}
+
 namespace aten {
 class Decoder
 {
@@ -24,6 +28,6 @@ private:
     QImage frame;
     QByteArray palette = QByteArray(1024, 0);
     bool decodePlanes(const QByteArray& packet);
-    void* context = nullptr;
+    std::unique_ptr<aspeed::Decoder> aspeedDecoder;
 };
 }   // namespace aten

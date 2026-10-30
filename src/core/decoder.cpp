@@ -1,28 +1,21 @@
 #include "decoder.h"
 
-#include "aspeed.h"
+#include "aspeed/decoder.h"
 #include "protocol.h"
 
 #include <QtEndian>
 
 #include <cstring>
-#include <mutex>
 #include <vector>
 
 namespace aten {
-static std::mutex nativeMutex;
-static std::once_flag initialized;
 
 Decoder::Decoder()
 {
     resize({640, 480});
 }
 
-Decoder::~Decoder()
-{
-    std::lock_guard lock(nativeMutex);
-    aspeed_ctx_free(context);
-}
+Decoder::~Decoder() = default;
 
 void Decoder::resize(QSize size)
 {
@@ -31,9 +24,7 @@ void Decoder::resize(QSize size)
     {
         throw Error("Unsupported framebuffer dimensions");
     }
-    std::lock_guard lock(nativeMutex);
-    aspeed_ctx_free(context);
-    context = nullptr;
+    aspeedDecoder.reset();
     frame = QImage(size, QImage::Format_ARGB32);
     if (frame.isNull()) {
         throw Error("Cannot allocate framebuffer");
@@ -80,27 +71,20 @@ bool Decoder::decode(const QByteArray& packet, quint32 encoding)
             ((qsizetype(frame.width()) + blockSize - 1) / blockSize) *
                 ((frame.height() + blockSize - 1) / blockSize),
             0);
-        std::lock_guard lock(nativeMutex);
-        std::call_once(initialized, aspeed_init);
-        if (!context) {
-            context = aspeed_ctx_new();
+        if (!aspeedDecoder) {
+            aspeedDecoder = std::make_unique<aspeed::Decoder>();
         }
-        if (!context) {
-            throw Error("Cannot allocate ASPEED context");
-        }
-        aspeed_decode_ctx_map(
-            context,
-            words.data(),
-            int(packet.size() - 4),
-            frame.bits(),
-            frame.width(),
-            frame.height(),
-            marker == 0x1a6,
-            quint8(packet[0]),
-            quint8(packet[1]),
-            reinterpret_cast<unsigned char*>(changedBlocks.data()),
-            int(changedBlocks.size()));
-        return changedBlocks.contains(char(1));
+        return aspeedDecoder->decode(
+            {{words.data(), words.size()},
+             std::size_t(packet.size() - 4),
+             marker == 0x1a6 ? aspeed::Chroma::Yuv420 : aspeed::Chroma::Yuv444,
+             quint8(packet[0]),
+             quint8(packet[1])},
+            {{frame.bits(), std::size_t(frame.sizeInBytes())},
+             unsigned(frame.width()),
+             unsigned(frame.height())},
+            {reinterpret_cast<std::uint8_t*>(changedBlocks.data()),
+             std::size_t(changedBlocks.size())});
     }
     if (packet.size() < 10) {
         throw Error("Truncated ATEN header");

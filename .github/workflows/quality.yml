@@ -160,7 +160,7 @@ jobs:
         run: |
           if [ "${{ matrix.sanitizer }}" = thread ]; then
             # Prebuilt Qt/glib omit synchronization instrumentation. Exercise
-            # the shared native decoder through our real per-session wrapper.
+            # independent native decoders and the production Qt adapter.
             ctest --test-dir build-sanitized --output-on-failure -R '^(native_decoder|decoder_concurrency)$'
           else
             ctest --test-dir build-sanitized --output-on-failure

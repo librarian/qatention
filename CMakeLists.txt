@@ -4,19 +4,20 @@ if(NOT QATENTION_VERSION MATCHES "^([0-9]+)[.]([0-9]+)[.]([0-9]+)(-[A-Za-z0-9][A
     message(FATAL_ERROR "Invalid VERSION")
 endif()
 set(QATENTION_NUMERIC_VERSION "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}")
-project(qatention VERSION ${QATENTION_NUMERIC_VERSION} LANGUAGES C CXX)
+project(qatention VERSION ${QATENTION_NUMERIC_VERSION} LANGUAGES CXX)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
-set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(QATENTION_NATIVE_TESTS_ONLY "Build native decoder tests without Qt (for MSan)" OFF)
 include(cmake/Sanitizers.cmake)
 include(CTest)
-add_library(aspeed STATIC third_party/aspeed/decoder.c)
+add_library(aspeed STATIC third_party/aspeed/decoder.cpp)
 set_target_properties(aspeed PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(aspeed PUBLIC third_party)
 if(BUILD_TESTING)
-    add_executable(native_decoder_tests tests/native_decoder_tests.c)
-    target_include_directories(native_decoder_tests PRIVATE src)
+    add_executable(native_decoder_tests tests/native_decoder_tests.cpp)
+    find_package(Threads REQUIRED)
+    target_link_libraries(native_decoder_tests PRIVATE Threads::Threads)
     target_link_libraries(native_decoder_tests PRIVATE aspeed)
     add_test(NAME native_decoder COMMAND native_decoder_tests)
     set_tests_properties(native_decoder PROPERTIES TIMEOUT 60)
@@ -34,7 +35,7 @@ endif()
 qt_standard_project_setup(REQUIRES 6.8)
 include(GNUInstallDirs)
 
-# The upstream C source uses GNU variadic macros; Clang/GCC are the supported compilers.
+# The ASPEED codec is Qt-independent; the core adapts packets and QImage storage.
 add_library(qatention_core STATIC
     src/core/decoder.cpp src/core/decoder.h
     src/core/protocol.cpp src/core/protocol.h

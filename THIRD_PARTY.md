@@ -9,12 +9,20 @@ Reference sources inspected for this initial port:
 - Existing ATENtion checkout, commit `a99e97f500c8d7ca98dfb4bb836fc1dc3b86483d`,
   including the later per-session ASPEED context/block-map API and protocol fixes.
 
-`third_party/aspeed/{decoder.c,jpegdec.h,jtable.h}` are copied without algorithmic
-changes from the latter checkout. They originate in ASPEED Technology's reference
-decoder and retain the MPL-2.0 license in `third_party/aspeed/LICENSE`. The complete
-vendored source and license are installed alongside the application. Keeping this
-library as C does not require shipping a separate DLL/.so/.dylib: it is statically
-linked into the application, independently of the dynamically linked Qt libraries.
+`third_party/aspeed/{decoder.cpp,decoder.h,tables.h}` derive from ASPEED
+Technology's reference decoder via the latter ATENtion checkout. They retain
+its MPL-2.0 attribution and license in `third_party/aspeed/LICENSE`.
+
+Local changes include bounds and arithmetic fixes, valid-reference tracking,
+and a Qt-independent C++ decoder with owned per-instance state. The C global
+state/context-swapping API was removed. Quantization loading was consolidated;
+bitstream parsing, block output and buffer validation now have explicit types.
+The native regression corpus records output compatibility with the fixed C
+implementation at qatention commit `67bbd4a`. This is a maintained derivative,
+not an unchanged copy of the reference decoder.
+
+The complete derived source and license are installed alongside the application.
+The decoder is statically linked; it does not require a separate shared library.
 
 `resources/client.pfx` is the **public vendor-distributed** generic Supermicro iKVM
 client identity already embedded by ATENtion, from X10 AST2400 firmware 04.07.

@@ -126,9 +126,8 @@ private slots:
 
     void parallelDecoderContexts()
     {
-        // Exercise the actual C++ serialization boundary under TSan. Native
-        // globals must never be entered concurrently, even for separate
-        // sessions.
+        // Exercise the Qt adapter with independent native decoder instances.
+        // There is no process-wide lock or state swap between sessions.
         std::atomic<bool> failed = false;
         auto decode = [&failed](bool white)
         {

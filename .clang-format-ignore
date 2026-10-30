@@ -1,3 +1,4 @@
-# Vendored and generated code is not owned by this project.
+# Format the maintained ASPEED derivative; other vendor/generated files stay excluded.
 third_party/**
+!third_party/aspeed/**
 build*/**

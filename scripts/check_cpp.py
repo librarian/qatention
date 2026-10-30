@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Format/check first-party C++ or run tidy against a built compilation database."""
+"""Format/check maintained C++ or run tidy against a built compilation database."""
 import argparse
 import json
 from pathlib import Path
@@ -14,9 +14,11 @@ def main():
     parser.add_argument('--build', type=Path, help='Run clang-tidy using this build directory')
     args = parser.parse_args()
     files = subprocess.check_output(
-        ['git', 'ls-files', '-z', 'src', 'tests'], cwd=ROOT
+        ['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard',
+         'src', 'tests', 'third_party/aspeed'], cwd=ROOT
     ).decode().split('\0')
-    files = [f for f in files if Path(f).suffix in ('.cpp', '.h')]
+    files = [f for f in dict.fromkeys(files)
+             if Path(f).suffix in ('.cpp', '.h') and (ROOT / f).is_file()]
     if args.build:
         build = args.build.resolve()
         entries = json.loads((build / 'compile_commands.json').read_text())
