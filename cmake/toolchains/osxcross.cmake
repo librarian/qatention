@@ -1,8 +1,14 @@
 set(CMAKE_SYSTEM_NAME Darwin)
 if(VCPKG_TARGET_ARCHITECTURE STREQUAL "arm64")
     set(CMAKE_SYSTEM_PROCESSOR arm64)
-else()
+elseif(VCPKG_TARGET_ARCHITECTURE STREQUAL "x64")
     set(CMAKE_SYSTEM_PROCESSOR x86_64)
+elseif(CMAKE_OSX_ARCHITECTURES MATCHES "^(arm64|x86_64)$")
+    # vcpkg defines TARGET_ARCHITECTURE inside dependency builds, but not
+    # when chainloading this file for the application itself.
+    set(CMAKE_SYSTEM_PROCESSOR "${CMAKE_OSX_ARCHITECTURES}")
+else()
+    message(FATAL_ERROR "Set CMAKE_OSX_ARCHITECTURES to arm64 or x86_64 for osxcross")
 endif()
 set(CMAKE_OSX_ARCHITECTURES "${CMAKE_SYSTEM_PROCESSOR}" CACHE STRING "")
 set(CMAKE_OSX_DEPLOYMENT_TARGET 12.0 CACHE STRING "")

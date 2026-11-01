@@ -81,6 +81,8 @@ jobs:
         run: |
           export PATH="$PWD/osxcross/bin:$PATH"
           bash scripts/build_macos_openssl.sh "$PWD/openssl-macos" "$RUNNER_TEMP/openssl-build" '${{ matrix.arch }}'
+      - name: Test cross-toolchain configuration
+        run: python3 tests/test_osxcross_toolchain.py
       - name: Configure
         run: |
           export PATH="$PWD/osxcross/bin:$PATH"
@@ -97,6 +99,7 @@ jobs:
             -DVCPKG_TARGET_TRIPLET="$triplet" \
             -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$PWD/cmake/toolchains/osxcross.cmake" \
             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+            -DCMAKE_OSX_ARCHITECTURES='${{ matrix.arch }}' \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
             "-DCMAKE_PREFIX_PATH=$PWD/qt-macos/6.8.3/macos" \
             "-DCMAKE_FIND_ROOT_PATH=$PWD/qt-macos/6.8.3/macos" \
