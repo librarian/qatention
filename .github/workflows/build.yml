@@ -44,10 +44,11 @@ jobs:
           RELEASE_ID: ${{ inputs.release_id }}
         run: python3 scripts/release_version.py check-source
       - name: Linux build dependencies
-        run: sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libfontconfig1-dev libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-image0 libxcb-render-util0
+        run: sudo apt-get update && sudo apt-get install -y autoconf autoconf-archive automake libtool pkg-config python3-venv zip ninja-build libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libfontconfig1-dev libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-image0 libxcb-render-util0
       - name: Windows cross-build dependencies
         if: matrix.target == 'windows-x64'
         run: sudo apt-get install -y g++-mingw-w64-x86-64-posix wine64 wine xvfb xauth
+      - uses: ./.github/actions/vcpkg
       - uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
         with:
           version: '6.8.3'
@@ -70,9 +71,11 @@ jobs:
           bash scripts/build_windows_openssl.sh "$PWD/openssl-windows" "$RUNNER_TEMP/openssl-build"
       - name: Configure
         run: |
-          args=()
+          args=(-DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+                -DVCPKG_TARGET_TRIPLET=x64-linux-qatention)
           if [[ '${{ matrix.target }}' == 'windows-x64' ]]; then
-            args+=(-DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/mingw64.cmake
+            args+=(-DVCPKG_TARGET_TRIPLET=x64-mingw-qatention
+                   "-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=$PWD/cmake/toolchains/mingw64.cmake"
                    "-DCMAKE_PREFIX_PATH=$PWD/qt-windows/6.8.3/mingw_64"
                    "-DQT_HOST_PATH=$QT_ROOT_DIR")
           fi

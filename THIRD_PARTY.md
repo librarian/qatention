@@ -33,11 +33,24 @@ vendor identity, extracted from that PFX for TLS backends without a PKCS#12
 importer (including Qt SecureTransport). Custom PFX overrides still require a
 backend with PKCS#12 import support.
 
-Qt is dynamically linked. This port uses Qt Core, Gui, Network and Widgets, plus Qt Test for tests. Qt and its bundled dependencies retain
+Qt is dynamically linked. This port uses Qt Core, Gui, Network, Concurrent and Widgets, plus Qt Test for tests. Qt and its bundled dependencies retain
 their own licenses; see https://doc.qt.io/qt-6.8/licensing.html . Development
 archives include Qt's LGPL/GPL license texts. Exact Qt source releases are at
 https://download.qt.io/archive/qt/6.8/6.8.3/single/ . Do not treat the application's
 MIT license as replacing Qt's or ASPEED's license.
+
+NSS and NSPR (MPL-2.0), spdlog (MIT), fmt (MIT), SQLite (public domain), and
+zlib (Zlib license) are managed by the pinned vcpkg manifest. NSS and NSPR are
+dynamically linked; spdlog and fmt are statically linked. Their notices are
+installed under `licenses/<package>/copyright` (embedded as resources on
+Android). NSS is built with its upstream libpkix option enabled; its source is
+the registry's checksum-verified source includes the registry's patches.
+Linux-hosted MinGW builds additionally apply `cmake/patches/nss/mingw-source.patch`
+and use NSS's Make build. The additional recipe and source patches are included
+in Windows packages under `share/qatention/source/nss-patches`.
+Source projects: https://github.com/nss-dev/nss, https://hg.mozilla.org/projects/nspr,
+https://github.com/gabime/spdlog, https://github.com/fmtlib/fmt,
+https://sqlite.org/src/, and https://github.com/madler/zlib.
 
 Windows and macOS cross-build packages include OpenSSL 3.5.9 (Apache-2.0), built from the
 checksum-verified upstream source using MinGW. Its license is included under

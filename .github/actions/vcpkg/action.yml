@@ -1,0 +1,16 @@
+name: Prepare vcpkg
+description: Bootstrap the pinned dependency manager and cache compiled packages
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/vcpkg/archives
+        key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'cmake/triplets/**', 'cmake/toolchains/**', 'cmake/patches/**', 'scripts/setup_vcpkg.py') }}-${{ github.job }}-${{ strategy.job-index }}
+        restore-keys: |
+          vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'cmake/triplets/**', 'cmake/toolchains/**', 'cmake/patches/**', 'scripts/setup_vcpkg.py') }}-
+    - shell: bash
+      run: |
+        python3 scripts/setup_vcpkg.py
+        python3 -m unittest discover -s tests -p test_setup_vcpkg.py
+        echo "VCPKG_ROOT=$GITHUB_WORKSPACE/third_party/vcpkg" >> "$GITHUB_ENV"

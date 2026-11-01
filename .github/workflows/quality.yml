@@ -60,8 +60,9 @@ jobs:
       - name: Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libfontconfig1-dev libxcb-cursor0
+          sudo apt-get install -y autoconf autoconf-archive automake libtool pkg-config python3-venv zip ninja-build libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libfontconfig1-dev libxcb-cursor0
           python -m pip install -r tools/requirements.txt
+      - uses: ./.github/actions/vcpkg
       - uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
         with:
           version: '6.8.3'
@@ -74,9 +75,9 @@ jobs:
           queries: security-extended
       - name: Build desktop and mobile UI for analysis
         run: |
-          cmake -S . -B build-quality -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake -S . -B build-quality -G Ninja -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-linux-qatention -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
           cmake --build build-quality --parallel 3
-          cmake -S . -B build-quality-mobile -G Ninja -DQATENTION_MOBILE=ON -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake -S . -B build-quality-mobile -G Ninja -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-linux-qatention -DQATENTION_MOBILE=ON -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
           cmake --build build-quality-mobile --parallel 3
       - name: Clang-tidy
         run: |
@@ -142,10 +143,11 @@ jobs:
       - name: Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-18 libclang-rt-18-dev ninja-build libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libfontconfig1-dev libxcb-cursor0
+          sudo apt-get install -y autoconf autoconf-archive automake libtool pkg-config python3-venv zip clang-18 libclang-rt-18-dev ninja-build libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libfontconfig1-dev libxcb-cursor0
           # Clang 18's shadow-memory layout requires this on high-entropy hosts.
           # This changes only the disposable CI runner, not installed applications.
           sudo sysctl vm.mmap_rnd_bits=28
+      - uses: ./.github/actions/vcpkg
       - uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
         with:
           version: '6.8.3'
@@ -153,7 +155,7 @@ jobs:
           cache: true
       - name: Build instrumented application and tests
         run: |
-          cmake -S . -B build-sanitized -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+          cmake -S . -B build-sanitized -G Ninja -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-linux-qatention -DCMAKE_BUILD_TYPE=Debug \
             -DQATENTION_SANITIZER=${{ matrix.sanitizer }} -DQATENTION_MOBILE=${{ matrix.mobile }}
           cmake --build build-sanitized --parallel 3
       - name: Run sanitizer regressions

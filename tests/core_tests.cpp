@@ -509,11 +509,27 @@ private slots:
         QVERIFY(f.resize(DebugLog::MaxFileBytes));
         f.close();
         log.setEnabled(true);
-        QVERIFY(QFile::exists(path + ".old"));
+        QVERIFY(QFile::exists(dir.filePath("debug.1.log")));
         QVERIFY(QFileInfo(path).size() < 1024);
         log.clear();
         QVERIFY(log.text().isEmpty());
         QVERIFY(!QFile::exists(path));
+    }
+
+    void debugLogFailureAndHistory()
+    {
+        QTemporaryDir directory;
+        DebugLog log(
+            directory.path());   // A directory cannot be opened as a log file.
+        log.setEnabled(true);
+        QVERIFY(log.text().contains("Cannot write log file"));
+        log.write(QString(70000, 'x'));
+        QVERIFY(log.text().size() <= 65536);
+        QVERIFY(log.text().contains("Cannot write log file"));
+        log.setEnabled(false);
+        const auto history = log.text();
+        log.write("disabled");
+        QCOMPARE(log.text(), history);
     }
 
     void wireVectors()

@@ -1,0 +1,29 @@
+--- a/portfile.cmake
++++ b/portfile.cmake
+@@ -13,16 +13,26 @@
+     SHA512 5ffb1182e7d65f8895c09656d20bc7146d1616cd4f09046469b2f79f60b57083094c78da39a3f3faa5087742a19f706ce9e7928a662f9f0d3c410514cba2028f
+ )
+ 
++# Keep the registry recipe for all other targets.
++set(qatention_source_patches "")
++if(VCPKG_TARGET_IS_MINGW)
++    list(APPEND qatention_source_patches mingw-source.patch)
++endif()
+ vcpkg_extract_source_archive(
+     SOURCE_PATH
+     ARCHIVE "${ARCHIVE}"
+     SOURCE_BASE "${VERSION}"
+     PATCHES
++        ${qatention_source_patches}
+         "02-gen-debug-info-for-release.patch"
+         "03-use-debug-crt-for-debug.patch" # See https://learn.microsoft.com/dotnet/api/microsoft.visualstudio.vcprojectengine.runtimelibraryoption
+         include-dirs.diff
+         macos-cross-compile.patch
+ )
++if(VCPKG_TARGET_IS_MINGW)
++    include("${CURRENT_PORT_DIR}/mingw.cmake")
++    return()
++endif()
+ file(GLOB devendor "${SOURCE_PATH}/nss/lib/sqlite/*.?" "${SOURCE_PATH}/nss/lib/zlib/*.?")
+ file(REMOVE ${devendor})
+ file(COPY "${CURRENT_PORT_DIR}/configure" DESTINATION "${SOURCE_PATH}")

@@ -27,6 +27,10 @@ if(QATENTION_NATIVE_TESTS_ONLY)
 endif()
 
 option(QATENTION_MOBILE "Build the Qt Quick mobile interface (also available on desktop for testing)" OFF)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+find_package(NSS REQUIRED)
+find_package(spdlog CONFIG REQUIRED)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Concurrent)
 if(ANDROID OR QATENTION_MOBILE)
     find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Network Quick QuickControls2)
 else()
@@ -42,6 +46,7 @@ add_library(qatention_core STATIC
     src/core/session.cpp src/core/session.h
     src/core/profiles.cpp src/core/profiles.h
     src/core/certificatechain.cpp src/core/certificatechain.h
+    src/core/nsshttp.cpp src/core/nsshttp.h src/core/nssheaders.h
     src/core/debuglog.cpp src/core/debuglog.h
     src/core/media.cpp src/core/media.h
     src/core/mediaprotocol.cpp src/core/mediaprotocol.h
@@ -49,7 +54,8 @@ add_library(qatention_core STATIC
     src/core/videotrace.cpp src/core/videotrace.h)
 target_include_directories(qatention_core PUBLIC src)
 target_compile_definitions(qatention_core PUBLIC QATENTION_VERSION="${QATENTION_VERSION}")
-target_link_libraries(qatention_core PUBLIC Qt6::Core Qt6::Gui Qt6::Network PRIVATE aspeed)
+target_link_libraries(qatention_core PUBLIC Qt6::Core Qt6::Gui Qt6::Network
+    PRIVATE aspeed Qt6::Concurrent NSS::NSS spdlog::spdlog)
 if(WIN32)
     target_link_libraries(qatention_core PRIVATE crypt32)
 endif()
@@ -79,6 +85,7 @@ if(ANDROID OR QATENTION_MOBILE)
             QT_ANDROID_VERSION_NAME "${QATENTION_VERSION}"
             QT_ANDROID_EXTRA_LIBS "${ANDROID_OPENSSL_DIR}/libcrypto_3.so;${ANDROID_OPENSSL_DIR}/libssl_3.so")
     endif()
+    include(cmake/DeployDependencies.cmake)
     if(NOT ANDROID)
         find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
         enable_testing()
@@ -105,7 +112,10 @@ set_target_properties(qatention PROPERTIES
     MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION})
 if(APPLE)
     set_target_properties(qatention qatention-capture PROPERTIES INSTALL_RPATH "@executable_path/../Frameworks")
+elseif(UNIX)
+    set_target_properties(qatention qatention-capture PROPERTIES INSTALL_RPATH "$ORIGIN/../lib")
 endif()
+include(cmake/DeployDependencies.cmake)
 install(TARGETS qatention BUNDLE DESTINATION . RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 # Retain the headless platform so installed packages can run the same UI/TLS smoke test.
 if(APPLE)
@@ -125,11 +135,14 @@ install(DIRECTORY third_party/aspeed DESTINATION ${CMAKE_INSTALL_DATADIR}/qatent
 
 include(CTest)
 if(BUILD_TESTING)
-    qt_add_executable(certificatechain_tests tests/certificatechain_tests.cpp src/core/certificatechain.cpp)
+    qt_add_executable(certificatechain_tests tests/certificatechain_tests.cpp
+        src/core/certificatechain.cpp src/core/nsshttp.cpp)
     target_include_directories(certificatechain_tests PRIVATE src)
-    target_link_libraries(certificatechain_tests PRIVATE Qt6::Network Qt6::Test)
+    target_link_libraries(certificatechain_tests PRIVATE Qt6::Network Qt6::Test Qt6::Concurrent NSS::NSS)
     qt_add_resources(certificatechain_tests test_certificates PREFIX /tls FILES
-        tests/certificates/root.pem tests/certificates/issuer.pem tests/certificates/leaf.pem tests/certificates/leaf.key)
+        tests/certificates/root.pem tests/certificates/issuer.pem tests/certificates/leaf.pem tests/certificates/leaf.key
+        tests/certificates/purpose-root.pem tests/certificates/purpose-server.pem
+        tests/certificates/purpose-client.pem tests/certificates/purpose-bad-usage.pem)
     add_test(NAME certificatechain COMMAND certificatechain_tests)
     set_tests_properties(certificatechain PROPERTIES TIMEOUT 30 RESOURCE_LOCK aia_test_port)
     qt_add_executable(input_tests tests/input_tests.cpp src/ui/console.cpp src/ui/console.h)

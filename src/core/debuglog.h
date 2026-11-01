@@ -1,6 +1,11 @@
 #pragma once
-#include <QFile>
 #include <QObject>
+
+#include <memory>
+
+namespace spdlog {
+class logger;
+}
 
 namespace aten {
 class DebugLog: public QObject
@@ -11,6 +16,7 @@ class DebugLog: public QObject
     Q_PROPERTY(QString path READ path CONSTANT)
 public:
     explicit DebugLog(const QString& path, QObject* parent = nullptr);
+    ~DebugLog() override;
 
     bool enabled() const
     {
@@ -24,7 +30,7 @@ public:
 
     QString path() const
     {
-        return file.fileName();
+        return filePath;
     }
 
     void setEnabled(bool enabled);
@@ -37,7 +43,9 @@ signals:
     void changed();
 
 private:
-    QFile file;
+    void appendHistory(const QString& line);
+    QString filePath;
+    std::shared_ptr<spdlog::logger> logger;
     QString lines;
     bool active = false, captured = false;
 };

@@ -36,9 +36,10 @@ jobs:
           distribution: temurin
           java-version: '17'
       - name: Build dependencies
-        run: sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev libxkbcommon-dev
+        run: sudo apt-get update && sudo apt-get install -y autoconf autoconf-archive automake libtool pkg-config python3-venv zip ninja-build libgl1-mesa-dev libxkbcommon-dev
       - name: Android SDK
         run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" "ndk;26.1.10909125"'
+      - uses: ./.github/actions/vcpkg
       - uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
         with:
           version: '6.8.3'
@@ -46,7 +47,9 @@ jobs:
           cache: true
       - name: Test mobile interface on Linux
         run: |
-          cmake -S . -B build-mobile -G Ninja -DQATENTION_MOBILE=ON
+          cmake -S . -B build-mobile -G Ninja -DQATENTION_MOBILE=ON \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux-qatention
           cmake --build build-mobile --parallel 3
           QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software build-mobile/qatention --smoke-test
           ctest --test-dir build-mobile --output-on-failure
@@ -79,9 +82,13 @@ jobs:
           done
       - name: Build APK
         run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/26.1.10909125"
           qt-android/6.8.3/android_arm64_v8a/bin/qt-cmake -S . -B build-android -G Ninja \
             -DQT_HOST_PATH="$QT_ROOT_DIR" -DANDROID_SDK_ROOT="$ANDROID_HOME" \
             -DANDROID_NDK_ROOT="$ANDROID_HOME/ndk/26.1.10909125" \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=arm64-android-qatention \
+            -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
             -DANDROID_OPENSSL_DIR="$PWD/openssl-android" -DCMAKE_BUILD_TYPE=Debug \
             -DQATENTION_ANDROID_VERSION_CODE="$((100 + GITHUB_RUN_NUMBER))"
           cmake --build build-android --target apk --parallel 3

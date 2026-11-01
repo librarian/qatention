@@ -1,4 +1,6 @@
 /build*/
+/vcpkg_installed/
+/.vcpkg-overlays/
 /dist/
 *.user
 *.log

@@ -1,3 +1,4 @@
+#include "core/certificatechain.h"
 #include "core/media.h"
 #include "mobile.h"
 
@@ -46,7 +47,8 @@ int main(int argc, char** argv)
         return 1;
     }
     if (app.arguments().contains("--smoke-test")) {
-        if (!QSslSocket::supportsSsl()) {
+        if (!QSslSocket::supportsSsl() || !aten::CertificateChain::available())
+        {
             return 2;
         }
         try {

@@ -30,6 +30,9 @@ otool = tools / (args.arch + '-apple-darwin23.5-otool')
 lipo = tools / (args.arch + '-apple-darwin23.5-lipo')
 signer = tools / 'rcodesign'
 queue = list((contents / 'MacOS').iterdir())
+# CMake deploys NSS/NSPR, including dynamically loaded crypto modules.
+queue.extend(frameworks.glob('*.dylib'))
+install_name_tool = tools / (args.arch + '-apple-darwin23.5-install_name_tool')
 openssl_names = {'libcrypto.3.dylib', 'libssl.3.dylib'}
 for name in sorted(openssl_names):
     target = frameworks / name
@@ -76,6 +79,12 @@ while queue:
         if dependency.startswith(('/System/Library/', '/usr/lib/')):
             continue
         if dependency in {'@rpath/' + name for name in openssl_names}:
+            continue
+        if (frameworks / Path(dependency).name).is_file() and dependency.endswith('.dylib'):
+            bundled_name = '@rpath/' + Path(dependency).name
+            if dependency != bundled_name:
+                subprocess.run([str(install_name_tool), '-change', dependency,
+                                bundled_name, str(binary)], check=True)
             continue
         if dependency.startswith('@rpath/') and '.framework/' in dependency:
             name = dependency.split('/')[1]

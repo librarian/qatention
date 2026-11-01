@@ -1,157 +1,316 @@
 #include "certificatechain.h"
 
-#include <QCryptographicHash>
-#include <QHash>
-#include <QNetworkAccessManager>
-#include <QNetworkReply>
-#include <QNetworkRequest>
-#include <QSet>
-#include <QSslCertificateExtension>
-#include <QSslSocket>
-#include <QTimer>
-#include <QVariant>
+#include "nsshttp.h"
 
+#include <QCryptographicHash>
+#include <QFutureWatcher>
+#include <QHash>
+#include <QMutex>
+#include <QMutexLocker>
+#include <QPointer>
+#include <QSslConfiguration>
+#include <QThreadPool>
+#include <QTimer>
+#include <QUrl>
+#include <QtConcurrentRun>
+
+#include <array>
 #include <memory>
+#include <vector>
 
 namespace aten {
 namespace {
-// Process-local, bounded cache. Each use revalidates against current
-// roots/time/hostname.
-QHash<QByteArray, QList<QSslCertificate>> chains;
+using Certificate =
+    std::unique_ptr<CERTCertificate, decltype(&CERT_DestroyCertificate)>;
+using CertificateList =
+    std::unique_ptr<CERTCertList, decltype(&CERT_DestroyCertList)>;
 
-QByteArray identity(const QSslCertificate& cert)
-{
-    return cert.digest(QCryptographicHash::Sha256);
-}
-
-constexpr qsizetype MaxDownload = 64LL * 1024;
-
-class Fetch: public QObject
+class NssRuntime
 {
 public:
-    QList<QSslCertificate> chain;
-    QString host;
-    std::function<void(const QString&)> log;
-    std::function<void(bool)> done;
-    QNetworkAccessManager network{this};
-    QSet<QUrl> visited;
-    QTimer deadline{this};
-    bool finished = false;
-
-    Fetch(QObject* owner)
-        : QObject(owner)
+    NssRuntime()
     {
-        deadline.setSingleShot(true);
-        connect(&deadline, &QTimer::timeout, this, [this] { finish(false); });
-        connect(
-            &network,
-            &QNetworkAccessManager::authenticationRequired,
-            this,
-            [](QNetworkReply* r, QAuthenticator*) { r->abort(); });
+        // No persistent NSS database or separate root store. Every verification
+        // receives the same trust anchors as Qt's current TLS configuration.
+        context = NSS_InitContext(
+            "",
+            "",
+            "",
+            "",
+            nullptr,
+            NSS_INIT_READONLY | NSS_INIT_NOCERTDB | NSS_INIT_NOMODDB |
+                NSS_INIT_NOROOTINIT | NSS_INIT_OPTIMIZESPACE);
+        ready = context &&
+                CERT_SetUsePKIXForValidation(PR_TRUE) == SECSuccess &&
+                SEC_RegisterDefaultHttpClient(nssHttpClient()) == SECSuccess;
+        workers.setMaxThreadCount(2);
     }
 
-    void finish(bool ok)
+    ~NssRuntime()
+    {
+        // NSS and the HTTP callback table must outlive every verification.
+        workers.waitForDone();
+        if (context) {
+            NSS_ShutdownContext(context);
+        }
+    }
+
+    bool ready = false;
+    QThreadPool workers;
+
+private:
+    NSSInitContext* context = nullptr;
+};
+
+NssRuntime& runtime()
+{
+    static NssRuntime instance;
+    return instance;
+}
+
+struct CertificateCache
+{
+    QMutex mutex;
+    QHash<QByteArray, QList<QSslCertificate>> chains;
+};
+
+CertificateCache& certificateCache()
+{
+    static CertificateCache cache;
+    return cache;
+}
+
+QByteArray identity(const QSslCertificate& certificate)
+{
+    return certificate.digest(QCryptographicHash::Sha256);
+}
+
+Certificate importCertificate(const QSslCertificate& certificate)
+{
+    auto der = certificate.toDer();
+    if (der.isEmpty() || der.size() > 1024LL * 1024 ||
+        certificate.isBlacklisted())
+    {
+        return {nullptr, CERT_DestroyCertificate};
+    }
+    SECItem encoded{
+        siBuffer,
+        reinterpret_cast<unsigned char*>(der.data()),
+        static_cast<unsigned int>(der.size())};
+    // copyDER ensures NSS owns its bytes after this QByteArray is destroyed.
+    return {
+        CERT_NewTempCertificate(
+            CERT_GetDefaultCertDB(),
+            &encoded,
+            nullptr,
+            PR_FALSE,
+            PR_TRUE),
+        CERT_DestroyCertificate};
+}
+
+struct Verification
+{
+    bool trusted = false;
+    QList<QSslCertificate> chain;
+};
+
+Verification verifyWithNss(
+    const QList<QSslCertificate>& peer,
+    const QString& host,
+    const QList<QSslCertificate>& roots,
+    IssuerDownloads* downloads = nullptr)
+{
+    if (peer.isEmpty() || peer.size() > 8 || roots.isEmpty() ||
+        host.isEmpty() || host.contains(QChar::Null) || !runtime().ready ||
+        (downloads &&
+         (downloads->cancelled->load() || downloads->deadline.hasExpired())))
+    {
+        return {};
+    }
+    IssuerDownloadScope networkScope(downloads);
+    std::vector<Certificate> certificates;
+    for (const auto& certificate: peer) {
+        auto imported = importCertificate(certificate);
+        if (!imported) {
+            return {};
+        }
+        certificates.push_back(std::move(imported));
+    }
+    const auto hostname = QUrl::toAce(host);
+    if (hostname.isEmpty() ||
+        CERT_VerifyCertName(certificates.front().get(), hostname.constData()) !=
+            SECSuccess)
+    {
+        return {};
+    }
+    CertificateList anchors(CERT_NewCertList(), CERT_DestroyCertList);
+    if (!anchors) {
+        return {};
+    }
+    for (const auto& root: roots) {
+        auto imported = importCertificate(root);
+        if (!imported) {
+            continue;
+        }
+        // The list takes ownership on successful insertion.
+        auto* anchor = imported.release();
+        if (CERT_AddCertToListTail(anchors.get(), anchor) != SECSuccess) {
+            CERT_DestroyCertificate(anchor);
+            return {};
+        }
+    }
+    if (CERT_LIST_EMPTY(anchors.get())) {
+        return {};
+    }
+    // certificateUsageSSLServer selects NSS's TLS-server key usage and EKU
+    // checks, in addition to signatures, validity and CA constraints.
+    std::array<CERTValInParam, 5> parameters{};
+    parameters[0].type = cert_pi_trustAnchors;
+    parameters[0].value.pointer.chain = anchors.get();
+    parameters[1].type = cert_pi_useOnlyTrustAnchors;
+    parameters[1].value.scalar.b = PR_TRUE;
+    parameters[2].type = cert_pi_useAIACertFetch;
+    parameters[2].value.scalar.b = downloads ? PR_TRUE : PR_FALSE;
+    parameters[3].type = cert_pi_revocationFlags;
+    parameters[3].value.pointer.revocation =
+        CERT_GetClassicOCSPDisabledPolicy();
+    parameters[4].type = cert_pi_end;
+    std::array<CERTValOutParam, 2> output{};
+    output[0].type = cert_po_certList;
+    output[1].type = cert_po_end;
+    const auto status = CERT_PKIXVerifyCert(
+        certificates.front().get(),
+        certificateUsageSSLServer,
+        parameters.data(),
+        output.data(),
+        nullptr);
+    CertificateList verified(
+        output[0].value.pointer.chain,
+        CERT_DestroyCertList);
+    if (status != SECSuccess || !verified ||
+        (downloads &&
+         (downloads->cancelled->load() || downloads->deadline.hasExpired())))
+    {
+        return {};
+    }
+    Verification result;
+    for (auto* node = CERT_LIST_HEAD(verified.get());
+         !CERT_LIST_END(node, verified.get());
+         node = CERT_LIST_NEXT(node))
+    {
+        const auto& der = node->cert->derCert;
+        const QSslCertificate certificate(
+            QByteArray(
+                reinterpret_cast<const char*>(der.data),
+                static_cast<qsizetype>(der.len)),
+            QSsl::Der);
+        if (certificate.isNull() || certificate.isBlacklisted() ||
+            result.chain.size() >= 8)
+        {
+            return {};
+        }
+        result.chain.append(certificate);
+    }
+    result.trusted = !result.chain.isEmpty();
+    return result;
+}
+
+class VerificationJob: public QObject
+{
+public:
+    VerificationJob(
+        QObject* owner,
+        QList<QSslCertificate> peer,
+        QString host,
+        std::function<void(const QString&)> log,
+        std::function<void(bool)> done)
+        : QObject(owner)
+        , hostname(std::move(host))
+        , report(std::move(log))
+        , complete(std::move(done))
+    {
+        connect(
+            this,
+            &QObject::destroyed,
+            [cancelled = cancellation] { cancelled->store(true); });
+        connect(&deadline, &QTimer::timeout, this, [this] { finish(false); });
+        connect(
+            &watcher,
+            &QFutureWatcher<Verification>::finished,
+            this,
+            [this]
+            {
+                const auto result = watcher.result();
+                // Trust settings might have changed while the worker was
+                // fetching.
+                const bool trusted =
+                    result.trusted &&
+                    CertificateChain::verify(result.chain, hostname);
+                if (trusted) {
+                    auto& cache = certificateCache();
+                    QMutexLocker lock(&cache.mutex);
+                    if (cache.chains.size() >= 32) {
+                        cache.chains.clear();
+                    }
+                    cache.chains.insert(
+                        identity(result.chain.first()),
+                        result.chain.mid(1));
+                }
+                finish(trusted);
+            });
+        const auto roots =
+            QSslConfiguration::defaultConfiguration().caCertificates();
+        // The deadline includes time waiting for a free worker.
+        IssuerDownloads downloads{cancellation, QDeadlineTimer(15000), {}};
+        deadline.setSingleShot(true);
+        deadline.start(15000);
+        watcher.setFuture(
+            QtConcurrent::run(
+                &runtime().workers,
+                [peer = std::move(peer),
+                 host = hostname,
+                 roots,
+                 downloads = std::move(downloads)]() mutable
+                { return verifyWithNss(peer, host, roots, &downloads); }));
+    }
+
+private:
+    void finish(bool trusted)
     {
         if (finished) {
             return;
         }
         finished = true;
+        cancellation->store(true);
         deadline.stop();
-        if (ok) {
-            if (chains.size() >= 32) {
-                chains.clear();
-            }
-            chains.insert(identity(chain.first()), chain.mid(1));
-        }
-        log(ok ? "HTTPS: completed certificate chain and hostname verified"
-               : "HTTPS: could not complete a trusted certificate chain");
+        const auto reportResult = report;
+        const auto completeResult = complete;
+        const QPointer<VerificationJob> guard(this);
         deleteLater();
-        done(ok);
+        reportResult(
+            trusted
+                ? "HTTPS: NSS verified certificate chain and hostname"
+                : "HTTPS: NSS could not complete a trusted certificate chain");
+        if (guard) {
+            completeResult(trusted);
+        }
     }
 
-    void next()
-    {
-        if (CertificateChain::verify(chain, host)) {
-            finish(true);
-            return;
-        }
-        if (chain.isEmpty() || chain.size() >= 8 || visited.size() >= 6) {
-            finish(false);
-            return;
-        }
-        const auto url = CertificateChain::issuerUrl(chain.last());
-        if (url.isEmpty() || visited.contains(url)) {
-            finish(false);
-            return;
-        }
-        visited.insert(url);
-        log("HTTPS: fetching missing issuer from " + url.toString());
-        QNetworkRequest request(url);
-        request.setTransferTimeout(5000);
-        request.setAttribute(
-            QNetworkRequest::RedirectPolicyAttribute,
-            QNetworkRequest::ManualRedirectPolicy);
-        request.setAttribute(
-            QNetworkRequest::CookieLoadControlAttribute,
-            QNetworkRequest::Manual);
-        request.setAttribute(
-            QNetworkRequest::CookieSaveControlAttribute,
-            QNetworkRequest::Manual);
-        auto* reply = network.get(request);
-        reply->setReadBufferSize(MaxDownload + 1);
-        auto data = std::make_shared<QByteArray>();
-        connect(
-            reply,
-            &QNetworkReply::readyRead,
-            this,
-            [reply, data]
-            {
-                data->append(reply->readAll());
-                if (data->size() > MaxDownload) {
-                    reply->abort();
-                }
-            });
-        connect(
-            reply,
-            &QNetworkReply::finished,
-            this,
-            [this, reply, data]
-            {
-                reply->deleteLater();
-                if (finished) {
-                    return;
-                }
-                data->append(reply->readAll());
-                if (reply->error() != QNetworkReply::NoError ||
-                    reply->attribute(QNetworkRequest::HttpStatusCodeAttribute)
-                            .toInt() != 200 ||
-                    data->size() > MaxDownload)
-                {
-                    finish(false);
-                    return;
-                }
-                auto certs = QSslCertificate::fromData(*data, QSsl::Der);
-                if (certs.isEmpty()) {
-                    certs = QSslCertificate::fromData(*data, QSsl::Pem);
-                }
-                // AIA caIssuers endpoints normally return one DER certificate.
-                // Also accept PEM chains.
-                if (certs.isEmpty() || chain.size() + certs.size() > 8) {
-                    finish(false);
-                    return;
-                }
-                for (const auto& cert: certs) {
-                    if (cert.isNull() || chain.contains(cert)) {
-                        finish(false);
-                        return;
-                    }
-                    chain.append(cert);
-                }
-                next();
-            });
-    }
+    QString hostname;
+    std::function<void(const QString&)> report;
+    std::function<void(bool)> complete;
+    std::shared_ptr<std::atomic_bool> cancellation =
+        std::make_shared<std::atomic_bool>(false);
+    QTimer deadline{this};
+    QFutureWatcher<Verification> watcher{this};
+    bool finished = false;
 };
 }   // namespace
+
+bool CertificateChain::available()
+{
+    return runtime().ready;
+}
 
 bool CertificateChain::missingIssuerOnly(const QList<QSslError>& errors)
 {
@@ -175,36 +334,11 @@ bool CertificateChain::verify(
     const QList<QSslCertificate>& chain,
     const QString& host)
 {
-    if (chain.isEmpty() || host.isEmpty()) {
-        return false;
-    }
-    // Qt's standalone OpenSSL chain verifier does not set sslserver purpose.
-    // Enforce EKU on every supplied certificate as well as the handshake's
-    // checks.
-    for (const auto& cert: chain) {
-        if (cert.isBlacklisted()) {
-            return false;
-        }
-        for (const auto& ext: cert.extensions()) {
-            if (ext.oid() != "2.5.29.37") {
-                continue;
-            }
-            bool server = false;
-            for (const auto& usage: ext.value().toList()) {
-                const auto name = usage.toString();
-                if (name == "TLS Web Server Authentication" ||
-                    name == "1.3.6.1.5.5.7.3.1" ||
-                    name == "Any Extended Key Usage" || name == "2.5.29.37.0")
-                {
-                    server = true;
-                }
-            }
-            if (!server) {
-                return false;
-            }
-        }
-    }
-    return QSslCertificate::verify(chain, host).isEmpty();
+    return verifyWithNss(
+               chain,
+               host,
+               QSslConfiguration::defaultConfiguration().caCertificates())
+        .trusted;
 }
 
 QList<QSslCertificate> CertificateChain::cached(
@@ -213,33 +347,15 @@ QList<QSslCertificate> CertificateChain::cached(
     if (peer.isEmpty()) {
         return peer;
     }
+    auto& cache = certificateCache();
+    QMutexLocker lock(&cache.mutex);
     auto result = peer;
-    for (const auto& cert: chains.value(identity(peer.first()))) {
-        if (!result.contains(cert)) {
-            result.append(cert);
+    for (const auto& certificate: cache.chains.value(identity(peer.first()))) {
+        if (!result.contains(certificate)) {
+            result.append(certificate);
         }
     }
     return result;
-}
-
-QUrl CertificateChain::issuerUrl(const QSslCertificate& certificate)
-{
-    for (const auto& ext: certificate.extensions()) {
-        if (ext.oid() != "1.3.6.1.5.5.7.1.1") {
-            continue;
-        }
-        const QUrl url(
-            ext.value().toMap().value("caIssuers").toString(),
-            QUrl::StrictMode);
-        if (url.isValid() &&
-            (url.scheme() == "http" || url.scheme() == "https") &&
-            !url.host().isEmpty() && url.userInfo().isEmpty() &&
-            !url.hasFragment())
-        {
-            return url;
-        }
-    }
-    return {};
 }
 
 void CertificateChain::fetch(
@@ -249,12 +365,11 @@ void CertificateChain::fetch(
     std::function<void(const QString&)> log,
     std::function<void(bool)> done)
 {
-    auto* job = new Fetch(owner);
-    job->chain = cached(peer);
-    job->host = host;
-    job->log = std::move(log);
-    job->done = std::move(done);
-    job->deadline.start(15000);
-    job->next();
+    new VerificationJob(
+        owner,
+        cached(peer),
+        host,
+        std::move(log),
+        std::move(done));
 }
 }   // namespace aten

@@ -29,11 +29,15 @@ from a mounted ISO is not established by those checks.
 
 ## Build
 
-Install Qt 6.8.3 (Core, Gui, Network, Widgets and Test),
+Install Qt 6.8.3 (Core, Gui, Network, Concurrent, Widgets and Test),
 CMake 3.24+, Ninja, and a C/C++ compiler. CI pins Qt to 6.8.3.
 
 ```sh
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/path/to/Qt/6.8.3/gcc_64
+python3 scripts/setup_vcpkg.py
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_PREFIX_PATH=/path/to/Qt/6.8.3/gcc_64 \
+  -DCMAKE_TOOLCHAIN_FILE="$PWD/third_party/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+  -DVCPKG_TARGET_TRIPLET=x64-linux-qatention
 cmake --build build
 ctest --test-dir build --output-on-failure
 cmake --install build --prefix "$PWD/dist"
@@ -46,7 +50,7 @@ from an x64 Visual Studio developer shell with LLVM available, and configure wit
 Linux build prerequisites on Ubuntu/Debian:
 
 ```sh
-sudo apt install build-essential cmake ninja-build libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libfontconfig1-dev
+sudo apt install autoconf autoconf-archive automake libtool pkg-config python3-venv zip build-essential cmake ninja-build libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libfontconfig1-dev
 ```
 
 Run `build/qatention` (`build/qatention.app/Contents/MacOS/qatention` on macOS),
@@ -59,6 +63,53 @@ packages target the CI distribution's ABI, not every Linux release. Windows pack
 No signing credentials are required for these development builds.
 Linux still needs system graphics/input libraries (including libxkbcommon, X11/XCB,
 OpenGL/EGL, and fontconfig); the archive bundles Qt, not an entire Linux userspace.
+
+### Managed native dependencies
+
+`third_party/vcpkg` is an upstream Git submodule pinned to the same commit as
+`builtin-baseline` in `vcpkg.json`. `scripts/setup_vcpkg.py` initializes it,
+checks that both pins match and the checkout is clean, and bootstraps vcpkg.
+It never follows upstream's moving branch automatically.
+
+Setup generates `.vcpkg-overlays/nss` from that checkout's NSS recipe, then
+applies the small recipe patch in `cmake/patches/nss/`. The generated recipe is
+not committed. For Linux-hosted MinGW builds it selects NSS's existing Make
+build, with source patches that skip MSVC's `-GT` flag and allow selecting the
+shipped tools separately from NSS's test programs. Other targets retain the
+upstream GYP build. Both build paths enable libpkix.
+
+To update dependencies, check out the chosen upstream commit in the submodule,
+set `builtin-baseline` to that same commit, and stage the submodule pointer.
+Run setup again, then the platform builds and tests. Setup stops on recipe patch
+drift; source patch failures and compiler/linker errors fail the dependency
+build. CI's binary cache includes the manifest, patches and triplets.
+
+Project triplets under `cmake/triplets/` enable NSS's `--enable-libpkix` through
+`VCPKG_MAKE_CONFIGURE_OPTIONS` for the GYP build; the MinGW Make build explicitly
+keeps `NSS_DISABLE_LIBPKIX` unset. Select `x64-linux-qatention`,
+`x64-mingw-qatention`, `x64-windows-qatention` (MSVC), `x64-osx-qatention`,
+`arm64-osx-qatention`, or `arm64-android-qatention` for the target.
+Linux-hosted macOS builds additionally set `OSXCROSS_ROOT`; Android builds set
+`ANDROID_NDK_HOME`. The Linux-hosted Windows CI uses Ubuntu 24.04's GCC 13;
+NSPR 4.36 has additional type errors with GCC 14 that this overlay does not fix.
+
+NSS builds and validates missing-intermediate chains, checks the hostname and
+TLS-server usage, and receives explicit trust anchors from Qt. Downloaded
+certificates never become trust anchors. Qt remains the TLS transport; NSS uses
+a bounded Qt HTTP adapter for issuer downloads, with cancellation, no redirects
+or cookies, a 64 KiB response limit, and a 15-second overall deadline. Issuer
+fetching runs on at most two worker threads. Tests exercise the actual NSS
+integration, including the login retry after a failed incomplete-chain handshake.
+
+spdlog owns file writing and rotation. The Qt adapter keeps the opt-in controls,
+bounded UI history, and separate packet dumps. One rotated file is retained,
+using spdlog's filename convention (`debug.1.log` for `debug.log`). Files remain
+owner-readable/writable. The `qatention.session` Qt logging category can also
+be enabled with `QT_LOGGING_RULES=qatention.session.debug=true`.
+
+NSS/NSPR shared libraries, dynamically loaded crypto modules, and dependency
+licenses are included in application packages. spdlog and fmt are linked
+statically. No Rust or Cargo toolchain is required.
 
 ### GitHub build matrix
 
@@ -153,9 +204,12 @@ Install the native Linux build dependencies above plus
 and Windows MinGW SDKs (for example with `aqtinstall`). Then:
 
 ```sh
+python3 scripts/setup_vcpkg.py
 bash scripts/build_windows_openssl.sh "$PWD/openssl-windows" /tmp/openssl-build
 cmake -S . -B build-windows -G Ninja -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/mingw64.cmake \
+  -DCMAKE_TOOLCHAIN_FILE="$PWD/third_party/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+  -DVCPKG_TARGET_TRIPLET=x64-mingw-qatention \
+  -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$PWD/cmake/toolchains/mingw64.cmake" \
   -DCMAKE_PREFIX_PATH=/path/to/windows/6.8.3/mingw_64 \
   -DQT_HOST_PATH=/path/to/linux/6.8.3/gcc_64
 cmake --build build-windows --parallel 3

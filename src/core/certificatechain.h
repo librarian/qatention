@@ -2,7 +2,6 @@
 #include <QObject>
 #include <QSslCertificate>
 #include <QSslError>
-#include <QUrl>
 
 #include <functional>
 
@@ -11,12 +10,12 @@ namespace aten {
 class CertificateChain
 {
 public:
+    static bool available();
     static bool missingIssuerOnly(const QList<QSslError>& errors);
     static bool verify(
         const QList<QSslCertificate>& chain,
         const QString& host);
     static QList<QSslCertificate> cached(const QList<QSslCertificate>& peer);
-    static QUrl issuerUrl(const QSslCertificate& certificate);
     static void fetch(
         QObject* owner,
         const QList<QSslCertificate>& peer,

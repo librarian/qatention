@@ -1,0 +1,26 @@
+--- a/nss/coreconf/WINNT.mk
++++ b/nss/coreconf/WINNT.mk
+@@ -14,7 +14,9 @@
+ #
+ # Win NT needs -GT so that fibers can work
+ #
++ifndef NS_USE_GCC
+ OS_CFLAGS += -GT
++endif
+ 
+ # WINNT uses the lib prefix, Win95 doesn't
+ NSPR31_LIB_PREFIX = lib
+--- a/nss/cmd/Makefile
++++ b/nss/cmd/Makefile
+@@ -42,6 +42,11 @@
+ 
+ $(SOFTOKEN_SRCDIRS) $(NSS_SRCDIRS): $(LIB_SRCDIRS)
+ 
++# Allow packagers to build the selected tools without unrelated test programs.
++ifdef NSS_CMD_TARGETS
++DIRS = lib $(NSS_CMD_TARGETS)
++endif
++
+ include $(CORE_DEPTH)/coreconf/rules.mk
+ 
+ symbols:

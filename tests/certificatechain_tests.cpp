@@ -6,6 +6,8 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QtTest>
+
+#include <memory>
 using namespace aten;
 
 static QSslCertificate cert(const char* name)
@@ -36,11 +38,16 @@ private slots:
 
     void verification()
     {
-        const auto leaf = cert("leaf.pem"), issuer = cert("issuer.pem");
-        QVERIFY(!CertificateChain::verify({leaf}, "localhost"));
+        QVERIFY(!CertificateChain::verify({cert("leaf.pem")}, "localhost"));
+        // NSS retains validated issuers internally. Use a separate PKI here so
+        // these offline checks cannot satisfy the later HTTP retrieval tests.
+        const auto leaf = cert("purpose-server.pem");
+        const auto issuer = cert("purpose-root.pem");
+        auto config = original;
+        config.setCaCertificates({issuer});
+        QSslConfiguration::setDefaultConfiguration(config);
         QVERIFY(CertificateChain::verify({leaf, issuer}, "localhost"));
         QVERIFY(!CertificateChain::verify({leaf, issuer}, "wrong.example"));
-        auto config = original;
         config.setCaCertificates({});
         QSslConfiguration::setDefaultConfiguration(config);
         QVERIFY(!CertificateChain::verify(
@@ -56,9 +63,6 @@ private slots:
             {QSslError(QSslError::CertificateExpired)}));
         QVERIFY(!CertificateChain::missingIssuerOnly(
             {QSslError(QSslError::SelfSignedCertificate)}));
-        QCOMPARE(
-            CertificateChain::issuerUrl(leaf),
-            QUrl("http://127.0.0.1:18081/issuer.der"));
     }
 
     void cancellation()
@@ -74,6 +78,59 @@ private slots:
         delete owner;
         QTest::qWait(50);
         QVERIFY(!called);
+    }
+
+    void serverPurposeAndTrust()
+    {
+        auto config = original;
+        config.setCaCertificates({cert("purpose-root.pem")});
+        QSslConfiguration::setDefaultConfiguration(config);
+        QVERIFY(
+            CertificateChain::verify(
+                {cert("purpose-server.pem")},
+                "localhost"));
+        QVERIFY(
+            CertificateChain::verify(
+                {cert("purpose-server.pem")},
+                "127.0.0.1"));
+        QVERIFY(!CertificateChain::verify(
+            {cert("purpose-client.pem")},
+            "localhost"));
+        QVERIFY(!CertificateChain::verify(
+            {cert("purpose-bad-usage.pem")},
+            "localhost"));
+        QVERIFY(!CertificateChain::verify(
+            {cert("purpose-server.pem")},
+            "wrong.example"));
+        config.setCaCertificates({cert("root.pem")});
+        QSslConfiguration::setDefaultConfiguration(config);
+        // A peer-supplied root must not grant trust, even after a successful
+        // check.
+        QVERIFY(!CertificateChain::verify(
+            {cert("purpose-server.pem"), cert("purpose-root.pem")},
+            "localhost"));
+    }
+
+    void cancelActiveFetch()
+    {
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost, 18081));
+        bool completed = false;
+        auto owner = std::make_unique<QObject>();
+        CertificateChain::fetch(
+            owner.get(),
+            {cert("leaf.pem")},
+            "localhost",
+            [](const QString&) {},
+            [&](bool) { completed = true; });
+        QTRY_VERIFY(server.hasPendingConnections());
+        auto* connection = server.nextPendingConnection();
+        QTRY_VERIFY(connection->bytesAvailable() > 0);
+        // Leave the HTTP response pending, then cancel the owning session.
+        owner.reset();
+        QTRY_COMPARE(connection->state(), QAbstractSocket::UnconnectedState);
+        QVERIFY(!completed);
+        delete connection;
     }
 
     void fetchAndCache()

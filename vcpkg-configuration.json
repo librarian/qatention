@@ -1,0 +1,4 @@
+{
+  "overlay-triplets": ["cmake/triplets"],
+  "overlay-ports": [".vcpkg-overlays"]
+}

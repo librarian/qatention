@@ -1,3 +1,4 @@
+#include "core/certificatechain.h"
 #include "ui/mainwindow.h"
 
 #include <QApplication>
@@ -23,7 +24,8 @@ int main(int argc, char** argv)
     MainWindow window(&profiles, &log, smoke);
     window.show();
     if (smoke) {
-        if (!QSslSocket::supportsSsl()) {
+        if (!QSslSocket::supportsSsl() || !aten::CertificateChain::available())
+        {
             return 2;
         }
         try {

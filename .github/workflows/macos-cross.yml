@@ -40,8 +40,9 @@ jobs:
         run: python3 scripts/release_version.py check-source
       - name: Cross-build dependencies
         run: |
-          sudo apt-get update && sudo apt-get install -y ninja-build clang-18 llvm-18 lld-18 make patch xz-utils bzip2 cpio libgl1-mesa-dev libxkbcommon-dev
+          sudo apt-get update && sudo apt-get install -y autoconf autoconf-archive automake libtool pkg-config python3-venv zip ninja-build clang-18 llvm-18 lld-18 make patch xz-utils bzip2 cpio libgl1-mesa-dev libxkbcommon-dev
           echo /usr/lib/llvm-18/bin >> "$GITHUB_PATH"
+      - uses: ./.github/actions/vcpkg
       - uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
         with:
           version: '6.8.3'
@@ -83,7 +84,13 @@ jobs:
       - name: Configure
         run: |
           export PATH="$PWD/osxcross/bin:$PATH"
-          ${{ matrix.arch }}-apple-darwin23.5-cmake -S . -B build -G Ninja \
+          export OSXCROSS_ROOT="$PWD/osxcross"
+          triplet=x64-osx-qatention
+          if [[ '${{ matrix.arch }}' == arm64 ]]; then triplet=arm64-osx-qatention; fi
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET="$triplet" \
+            -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$PWD/cmake/toolchains/osxcross.cmake" \
             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
             "-DCMAKE_PREFIX_PATH=$PWD/qt-macos/6.8.3/macos" \
