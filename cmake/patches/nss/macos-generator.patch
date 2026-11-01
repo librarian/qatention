@@ -1,0 +1,15 @@
+--- a/nss/build.sh
++++ b/nss/build.sh
+@@ -284,6 +284,12 @@
+         gyp_format="ninja-${gyp_flavor}"
+         export GYP_CROSSCOMPILE=1
+     fi
++    # OS=mac selects NSS definitions; the generator flavor selects Mach-O
++    # linker rules. Both must target macOS when the build host is Linux.
++    if [ "$(uname -s)" != "Darwin" ] && [ "$gyp_flavor" = "mac" ]; then
++        gyp_format=ninja-mac
++        export GYP_CROSSCOMPILE=1
++    fi
+     run_verbose run_scanbuild ${GYP} -f "$gyp_format" "${gyp_params[@]}" "$cwd/nss.gyp"
+ 
+     mv -f "$gyp_config.new" "$gyp_config"

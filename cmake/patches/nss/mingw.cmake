@@ -48,8 +48,10 @@ foreach(configuration IN LISTS nss_configurations)
     file(REMOVE_RECURSE "${build_root}")
     file(MAKE_DIRECTORY "${build_root}")
     file(COPY "${SOURCE_PATH}/nss" DESTINATION "${build_root}")
+    # NSS captures recursive Make output as object filenames. Ubuntu's Make
+    # adds directory banners there unless disabled at the top-level invocation.
     vcpkg_execute_required_process(
-        COMMAND "${nss_make}" "-j${VCPKG_CONCURRENCY}" all
+        COMMAND "${nss_make}" --no-print-directory "-j${VCPKG_CONCURRENCY}" all
             OS_TARGET=WINNT OS_ARCH=WINNT OS_RELEASE= CPU_ARCH=x86_64
             USE_64=1 NS_USE_GCC=1 CROSS_COMPILE=1 "${optimization}"
             NSS_DISABLE_GTESTS=1 NSS_DISABLE_DBM=1 NSS_DISABLE_LIBPKIX=

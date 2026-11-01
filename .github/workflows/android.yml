@@ -88,7 +88,7 @@ jobs:
             -DANDROID_NDK_ROOT="$ANDROID_HOME/ndk/26.1.10909125" \
             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_TARGET_TRIPLET=arm64-android-qatention \
-            -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$PWD/qt-android/6.8.3/android_arm64_v8a/lib/cmake/Qt6/qt.toolchain.cmake" \
             -DANDROID_OPENSSL_DIR="$PWD/openssl-android" -DCMAKE_BUILD_TYPE=Debug \
             -DQATENTION_ANDROID_VERSION_CODE="$((100 + GITHUB_RUN_NUMBER))"
           cmake --build build-android --target apk --parallel 3

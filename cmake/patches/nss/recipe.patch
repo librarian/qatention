@@ -1,6 +1,6 @@
 --- a/portfile.cmake
 +++ b/portfile.cmake
-@@ -13,16 +13,26 @@
+@@ -13,16 +13,27 @@
      SHA512 5ffb1182e7d65f8895c09656d20bc7146d1616cd4f09046469b2f79f60b57083094c78da39a3f3faa5087742a19f706ce9e7928a662f9f0d3c410514cba2028f
  )
  
@@ -19,7 +19,9 @@
          "03-use-debug-crt-for-debug.patch" # See https://learn.microsoft.com/dotnet/api/microsoft.visualstudio.vcprojectengine.runtimelibraryoption
          include-dirs.diff
          macos-cross-compile.patch
- )
+-)
++        macos-generator.patch
++)
 +if(VCPKG_TARGET_IS_MINGW)
 +    include("${CURRENT_PORT_DIR}/mingw.cmake")
 +    return()

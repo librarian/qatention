@@ -28,7 +28,7 @@ def generate_overlay(upstream, destination):
                        cwd=generated, check=True, capture_output=True, text=True)
         subprocess.run(['git', 'apply', str(patches / 'recipe.patch')],
                        cwd=generated, check=True, capture_output=True, text=True)
-        for name in ('mingw-source.patch', 'mingw.cmake'):
+        for name in ('mingw-source.patch', 'mingw.cmake', 'macos-generator.patch'):
             shutil.copy2(patches / name, generated / name)
         # Publish only a completely generated overlay. Patch failures stop setup.
         if destination.exists():
