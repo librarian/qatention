@@ -20,6 +20,8 @@ elseif(WIN32)
 else()
     if(APPLE)
         set(dependency_destination qatention.app/Contents/Frameworks)
+        install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/cmake/patches/nss/"
+            DESTINATION "qatention.app/Contents/Resources/source/nss-patches")
     else()
         set(dependency_destination lib)
     endif()

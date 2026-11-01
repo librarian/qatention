@@ -43,11 +43,14 @@ NSS and NSPR (MPL-2.0), spdlog (MIT), fmt (MIT), SQLite (public domain), and
 zlib (Zlib license) are managed by the pinned vcpkg manifest. NSS and NSPR are
 dynamically linked; spdlog and fmt are statically linked. Their notices are
 installed under `licenses/<package>/copyright` (embedded as resources on
-Android). NSS is built with its upstream libpkix option enabled; its source is
-the registry's checksum-verified source includes the registry's patches.
+Android). NSS is built with its upstream libpkix option enabled, using the
+registry's checksum-verified source and patches.
 Linux-hosted MinGW builds additionally apply `cmake/patches/nss/mingw-source.patch`
 and use NSS's Make build. The additional recipe and source patches are included
 in Windows packages under `share/qatention/source/nss-patches`.
+Linux-hosted macOS builds apply `cmake/patches/nss/macos-generator.patch` to
+select GYP's Mach-O generator. Patches are included in the macOS bundle under
+`Contents/Resources/source/nss-patches`.
 Source projects: https://github.com/nss-dev/nss, https://hg.mozilla.org/projects/nspr,
 https://github.com/gabime/spdlog, https://github.com/fmtlib/fmt,
 https://sqlite.org/src/, and https://github.com/madler/zlib.

@@ -3,6 +3,8 @@ set(VCPKG_CRT_LINKAGE dynamic)
 set(VCPKG_LIBRARY_LINKAGE static)
 set(VCPKG_CMAKE_SYSTEM_NAME Darwin)
 set(VCPKG_OSX_DEPLOYMENT_TARGET 12.0)
+# Reserve space for added LC_RPATH commands, not just longer library names.
+set(VCPKG_LINKER_FLAGS "-Wl,-headerpad,0x1000")
 if(DEFINED ENV{OSXCROSS_ROOT})
     set(VCPKG_CHAINLOAD_TOOLCHAIN_FILE "${CMAKE_CURRENT_LIST_DIR}/../toolchains/osxcross.cmake")
     list(APPEND VCPKG_ENV_PASSTHROUGH OSXCROSS_ROOT)

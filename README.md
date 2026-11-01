@@ -76,7 +76,8 @@ applies the small recipe patch in `cmake/patches/nss/`. The generated recipe is
 not committed. For Linux-hosted MinGW builds it selects NSS's existing Make
 build, with source patches that skip MSVC's `-GT` flag and allow selecting the
 shipped tools separately from NSS's test programs. Other targets retain the
-upstream GYP build. Both build paths enable libpkix.
+upstream GYP build, with a patch selecting its macOS generator when building
+macOS binaries on Linux. Both build paths enable libpkix.
 
 To update dependencies, check out the chosen upstream commit in the submodule,
 set `builtin-baseline` to that same commit, and stage the submodule pointer.
