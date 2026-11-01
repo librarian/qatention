@@ -85,6 +85,11 @@ jobs:
         run: |
           export PATH="$PWD/osxcross/bin:$PATH"
           export OSXCROSS_ROOT="$PWD/osxcross"
+          # vcpkg's Mach-O fixup searches for these unprefixed tool names.
+          # Set up aliases even when restoring an existing osxcross cache.
+          for tool in install_name_tool otool; do
+            ln -sf '${{ matrix.arch }}-apple-darwin23.5-'"$tool" "$OSXCROSS_ROOT/bin/$tool"
+          done
           triplet=x64-osx-qatention
           if [[ '${{ matrix.arch }}' == arm64 ]]; then triplet=arm64-osx-qatention; fi
           cmake -S . -B build -G Ninja \
