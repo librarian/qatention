@@ -90,7 +90,8 @@ jobs:
           export OSXCROSS_ROOT="$PWD/osxcross"
           bash scripts/build_qtwebsockets.sh qt-macos/6.8.3/macos "$RUNNER_TEMP/qtwebsockets-macos" lib/QtWebSockets.framework/Versions/A/QtWebSockets \
             -DCMAKE_TOOLCHAIN_FILE="$PWD/cmake/toolchains/osxcross.cmake" -DQT_HOST_PATH="$QT_ROOT_DIR" \
-            -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+            -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
+            -DQT_NO_APPLE_SDK_AND_XCODE_CHECK=ON
       - name: Configure
         run: |
           export PATH="$PWD/osxcross/bin:$PATH"
