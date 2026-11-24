@@ -1276,7 +1276,7 @@ void Session::pointer(int x, int y, int mask)
     }
     ++pointerEvents;
     if (megaRac) {
-        megaRac->pointer(x, y, mask);
+        megaRac->pointer(x, y, unsigned(mask));
         return;
     }
     lastPointer = {

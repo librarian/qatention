@@ -20,7 +20,7 @@ public:
     void refresh();
     void setStreaming(bool active);
     void key(quint32 usage, bool down);
-    void pointer(int x, int y, int mask);
+    void pointer(int x, int y, unsigned mask);
     void releaseInput();
 
     QSize size() const

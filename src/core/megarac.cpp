@@ -12,7 +12,7 @@ namespace aten {
 namespace {
 
 constexpr qsizetype HeaderSize = 8;
-constexpr qsizetype MaxPayload = 16 * 1024 * 1024;
+constexpr qsizetype MaxPayload = 16LL * 1024 * 1024;
 constexpr qsizetype VideoHeaderSize = 86;
 
 enum Command : quint16
@@ -126,7 +126,7 @@ void MegaRac::close()
 void MegaRac::send(quint16 type, quint16 status, QByteArrayView payload)
 {
     if (socket.state() == QAbstractSocket::ConnectedState) {
-        if (socket.bytesToWrite() > 1024 * 1024) {
+        if (socket.bytesToWrite() > 1024LL * 1024) {
             emit failed("MegaRAC stopped accepting input", true);
             return;
         }
@@ -221,9 +221,9 @@ void MegaRac::handle(quint16 type, quint16 status, QByteArrayView payload)
             break;
         case NextMaster:
         case Sharing: {
-            const auto step = status & 0xff;
+            const auto step = status & 0xffU;
             if (step == 4 || step == 6) {
-                setControl((status >> 8) == 0);
+                setControl((status >> 8U) == 0);
             } else if (step == 2) {
                 setControl(false);
             }
@@ -381,13 +381,14 @@ void MegaRac::key(quint32 usage, bool down)
     keyboard();
 }
 
-void MegaRac::pointer(int x, int y, int mask)
+void MegaRac::pointer(int x, int y, unsigned mask)
 {
     if (!controlling) {
         return;
     }
-    const auto buttons = (mask & 1) | ((mask & 2) << 1) | ((mask & 4) >> 1);
-    const auto wheel = ((mask & 8) != 0) - ((mask & 16) != 0);
+    const auto buttons =
+        (mask & 1U) | ((mask & 2U) << 1U) | ((mask & 4U) >> 1U);
+    const auto wheel = ((mask & 8U) != 0) - ((mask & 16U) != 0);
     const QPoint point(
         qBound(0, x, size().width() - 1),
         qBound(0, y, size().height() - 1));
