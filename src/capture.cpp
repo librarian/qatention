@@ -275,6 +275,12 @@ int main(int argc, char** argv)
                     return;
                 }
                 if (session.connected() && mount && !started) {
+                    if (!session.atenControls()) {
+                        std::cerr << "Virtual media is unavailable for this "
+                                     "console\n";
+                        finish(1);
+                        return;
+                    }
                     attach();
                 } else if (
                     !session.busy() && session.status() != "Disconnected") {

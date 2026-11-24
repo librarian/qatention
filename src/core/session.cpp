@@ -2,10 +2,12 @@
 
 #include "certificatechain.h"
 #include "media.h"
+#include "megarac.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QFile>
+#include <QJsonDocument>
 #include <QNetworkCookie>
 #include <QNetworkCookieJar>
 #include <QNetworkReply>
@@ -15,6 +17,8 @@
 #include <QSslConfiguration>
 #include <QSslKey>
 #include <QUrlQuery>
+
+#include <algorithm>
 
 static void initCertificateResource()
 {
@@ -73,6 +77,9 @@ Session::Session(QObject* parent)
             }
             if (received.elapsed() > 60000) {
                 fail("BMC stopped responding", true);
+                return;
+            }
+            if (megaRac) {
                 return;
             }
             send(consoleHeartbeat());
@@ -153,12 +160,19 @@ void Session::resetTransport()
         socket->deleteLater();
         socket = nullptr;
     }
+    if (megaRac) {
+        megaRac->disconnect(this);
+        megaRac->close();
+        megaRac->deleteLater();
+        megaRac = nullptr;
+    }
     if (webAuthenticated) {
         const auto cookies = web.cookieJar()->cookiesForUrl(baseUrl);
         const auto url = baseUrl;
-        const bool trust = allowUntrusted;
+        const auto csrf = megaRacCsrf;
+        const bool trust = csrf.isEmpty() && allowUntrusted;
         const QPointer<Session> owner(this);
-        auto logout = [cookies, url, trust, owner]
+        auto logout = [cookies, url, trust, owner, csrf]
         {
             // Survive closing a tab long enough to finish its bounded logout
             // request.
@@ -167,9 +181,18 @@ void Session::resetTransport()
             auto* jar = new QNetworkCookieJar(manager);
             jar->setCookiesFromUrl(cookies, url);
             manager->setCookieJar(jar);
-            QNetworkRequest request(url.resolved(QUrl("/cgi/logout.cgi")));
+            QNetworkRequest request(url.resolved(
+                QUrl(csrf.isEmpty() ? "/cgi/logout.cgi" : "/api/session")));
             request.setTransferTimeout(3000);
-            auto* networkReply = manager->get(request);
+            if (!csrf.isEmpty()) {
+                request.setAttribute(
+                    QNetworkRequest::RedirectPolicyAttribute,
+                    QNetworkRequest::ManualRedirectPolicy);
+                request.setRawHeader("X-CSRFTOKEN", csrf);
+            }
+            auto* networkReply = csrf.isEmpty()
+                                     ? manager->get(request)
+                                     : manager->deleteResource(request);
             // An absolute bound also covers a peer that trickles response
             // bytes.
             QTimer::singleShot(3000, networkReply, &QNetworkReply::abort);
@@ -217,6 +240,7 @@ void Session::resetTransport()
         webAuthenticated = false;
     }
     web.setCookieJar(new QNetworkCookieJar(&web));
+    megaRacCsrf.clear();
     tlsFailure.clear();
     consoleCandidate = QSslCertificate();
     buffer.clear();
@@ -320,8 +344,6 @@ void Session::startAttempt(const QVariantMap& options)
             QByteArray body =
                 "name=" + QUrl::toPercentEncoding(launch.user) +
                 "&pwd=" + QUrl::toPercentEncoding(launch.password);
-            launch.user.clear();
-            launch.password.clear();
             setStatus("Logging in to BMC…");
             requestWeb("/cgi/login.cgi", body, WebStep::Login);
         } else {
@@ -367,7 +389,9 @@ void Session::requestWeb(
     ssl.setProtocol(QSsl::TlsV1_2OrLater);
     request.setSslConfiguration(ssl);
     if (!csrf.isEmpty()) {
-        request.setRawHeader("CSRF_TOKEN", csrf);
+        request.setRawHeader(
+            step == WebStep::MegaRacConfig ? "X-CSRFTOKEN" : "CSRF_TOKEN",
+            csrf);
     }
     if (!body.isEmpty()) {
         request.setHeader(
@@ -383,10 +407,12 @@ void Session::requestWeb(
         networkReply,
         &QNetworkReply::sslErrors,
         this,
-        [this, networkReply, missingChain](const QList<QSslError>& errors)
+        [this, networkReply, missingChain, step](const QList<QSslError>& errors)
         {
             reportTlsErrors("HTTPS", errors);
-            if (allowUntrusted) {
+            if (allowUntrusted && step != WebStep::MegaRacLogin &&
+                step != WebStep::MegaRacConfig)
+            {
                 networkReply->ignoreSslErrors();
                 return;
             }
@@ -469,6 +495,28 @@ void Session::requestWeb(
                     });
                 return;
             }
+            if (step == WebStep::Login && baseUrl.scheme() == "https" &&
+                networkReply
+                        ->attribute(QNetworkRequest::HttpStatusCodeAttribute)
+                        .toInt() == 404)
+            {
+                if (!consoleTrust.isEmpty()) {
+                    fail(
+                        "Console endpoint changed. Review the saved profile's "
+                        "trusted console certificate.");
+                    return;
+                }
+                web.setCookieJar(new QNetworkCookieJar(&web));
+                emit diagnostic(
+                    "Legacy login endpoint unavailable; trying MegaRAC");
+                const QByteArray form =
+                    "username=" + QUrl::toPercentEncoding(launch.user) +
+                    "&password=" + QUrl::toPercentEncoding(launch.password);
+                launch.user.clear();
+                launch.password.clear();
+                requestWeb("/api/session", form, WebStep::MegaRacLogin);
+                return;
+            }
             if (networkReply->error() != QNetworkReply::NoError) {
                 fail(
                     tlsFailure.isEmpty() ? "BMC web request failed: " +
@@ -495,7 +543,13 @@ void Session::requestWeb(
                 return;
             }
             try {
-                handleWeb(responseBody, step);
+                if (step == WebStep::MegaRacConfig) {
+                    connectMegaRac(
+                        QJsonDocument::fromJson(responseBody).object(),
+                        networkReply->sslConfiguration());
+                } else {
+                    handleWeb(responseBody, step);
+                }
             } catch (const std::exception& e) {
                 fail(QString::fromUtf8(e.what()));
             }
@@ -506,7 +560,34 @@ void Session::handleWeb(const QByteArray& body, WebStep step)
 {
     const QString jnlpPath =
         "/cgi/url_redirect.cgi?url_name=ikvm&url_type=jwsk";
-    if (step == WebStep::Login) {
+    if (step == WebStep::MegaRacLogin) {
+        const auto cookieList =
+            web.cookieJar()->cookiesForUrl(baseUrl.resolved(QUrl("/kvm")));
+        const auto hasSession = std::any_of(
+            cookieList.cbegin(),
+            cookieList.cend(),
+            [](const QNetworkCookie& cookie)
+            { return cookie.name() == "QSESSIONID"; });
+        megaRacCsrf = QJsonDocument::fromJson(body)
+                          .object()
+                          .value("CSRFToken")
+                          .toString()
+                          .toUtf8();
+        if (!hasSession || megaRacCsrf.isEmpty() ||
+            megaRacCsrf.contains('\r') || megaRacCsrf.contains('\n'))
+        {
+            throw Error("MegaRAC login did not create a console session");
+        }
+        webAuthenticated = true;
+        setStatus("Requesting MegaRAC console credentials…");
+        requestWeb(
+            "/api/settings/media/h5viewercfg",
+            {},
+            WebStep::MegaRacConfig,
+            megaRacCsrf);
+    } else if (step == WebStep::Login) {
+        launch.user.clear();
+        launch.password.clear();
         if (web.cookieJar()->cookiesForUrl(baseUrl).isEmpty()) {
             throw Error(
                 "BMC did not create a login session; check credentials");
@@ -545,6 +626,99 @@ void Session::handleWeb(const QByteArray& body, WebStep step)
         launch.host = originalHost;
         connectKvm();
     }
+}
+
+void Session::connectMegaRac(
+    const QJsonObject& config,
+    const QSslConfiguration& ssl)
+{
+    if (config.value("kvm_service_status").toInt(1) == 0) {
+        throw Error("MegaRAC console service is disabled");
+    }
+    if (config.value("token").toString().isEmpty() ||
+        config.value("session").toString().isEmpty())
+    {
+        throw Error("MegaRAC returned incomplete console credentials");
+    }
+    const auto httpsUrl = baseUrl.resolved(QUrl("/kvm"));
+    QByteArray cookies;
+    for (const auto& cookie: web.cookieJar()->cookiesForUrl(httpsUrl)) {
+        if (cookie.name() == "QSESSIONID") {
+            cookies = cookie.toRawForm(QNetworkCookie::NameAndValueOnly);
+            break;
+        }
+    }
+    if (cookies.isEmpty()) {
+        throw Error("MegaRAC session cookie is unavailable");
+    }
+    auto url = httpsUrl;
+    url.setScheme("wss");
+    QNetworkRequest request(url);
+    auto configuration = ssl;
+    configuration.setPeerVerifyMode(QSslSocket::VerifyPeer);
+    // Use the TLS configuration of the authenticated HTTPS connection,
+    // including its trust anchors. The WSS peer is the same origin.
+    request.setSslConfiguration(configuration);
+    request.setRawHeader("Cookie", cookies);
+    auto origin = baseUrl;
+    if (origin.port() == 443) {
+        origin.setPort(-1);
+    }
+    // Each attempt gets a fresh socket and only uses it for this origin.
+    megaRac = new MegaRac(origin.toString(QUrl::FullyEncoded), this);
+    phase = Phase::Connecting;
+    controlling = false;
+    setStatus("Connecting to MegaRAC console…");
+    connect(megaRac, &MegaRac::failed, this, &Session::fail);
+    connect(
+        megaRac,
+        &MegaRac::activity,
+        this,
+        [this]
+        {
+            if (connected()) {
+                received.restart();
+                retryCount = 0;
+            }
+        });
+    connect(
+        megaRac,
+        &MegaRac::ready,
+        this,
+        [this](bool canControl)
+        {
+            if (!connected()) {
+                phase = Phase::Messages;
+                established = true;
+                deadline.stop();
+                uptime.start();
+                received.start();
+                heartbeat.start();
+                frames = 0;
+                megaRac->setStreaming(streaming);
+            }
+            controlling = canControl;
+            setStatus(
+                canControl ? "Connected — controlling (MegaRAC)"
+                           : "Connected — view only (MegaRAC)");
+        });
+    connect(
+        megaRac,
+        &MegaRac::frameReady,
+        this,
+        [this](const QImage& image)
+        {
+            if (image.isNull()) {
+                emit clearFrame();
+            } else {
+                ++frames;
+                if (streaming) {
+                    emit frameReady(image);
+                }
+            }
+        });
+    deadline.start(15000);
+    megaRac->open(request, config);
 }
 
 QSslCertificate Session::mediaTrustedCertificate() const
@@ -1032,7 +1206,7 @@ bool Session::consumeMessage()
 
 void Session::requestFrame()
 {
-    if (!connected() || !streaming) {
+    if (!atenControls() || !streaming) {
         return;
     }
     const bool overdue = pending && frameRequested.isValid() &&
@@ -1067,6 +1241,10 @@ void Session::requestFrame()
 
 void Session::refresh()
 {
+    if (megaRac) {
+        megaRac->refresh();
+        return;
+    }
     forceFull = true;
     requestFrame();
 }
@@ -1078,6 +1256,10 @@ void Session::key(quint32 usage, bool down)
         return;
     }
     ++keyEvents;
+    if (megaRac) {
+        megaRac->key(usage, down);
+        return;
+    }
     if (down) {
         held.insert(usage);
     } else {
@@ -1093,6 +1275,10 @@ void Session::pointer(int x, int y, int mask)
         return;
     }
     ++pointerEvents;
+    if (megaRac) {
+        megaRac->pointer(x, y, mask);
+        return;
+    }
     lastPointer = {
         qBound(0, x, decoder->image().width() - 1),
         qBound(0, y, decoder->image().height() - 1)};
@@ -1102,6 +1288,10 @@ void Session::pointer(int x, int y, int mask)
 
 void Session::releaseInput()
 {
+    if (megaRac) {
+        megaRac->releaseInput();
+        return;
+    }
     const auto keys = held;
     held.clear();
     const bool releaseButtons = buttons != 0;
@@ -1129,7 +1319,7 @@ void Session::ctrlAltDelete()
 namespace aten {
 void Session::power(int command)
 {
-    if (connected() && command >= 0 && command <= 3) {
+    if (atenControls() && command >= 0 && command <= 3) {
         QByteArray request(2, 0);
         request[0] = 0x1a;   // Power command: off/on/reset/ACPI in byte 1.
         request[1] = char(command);
@@ -1139,7 +1329,7 @@ void Session::power(int command)
 
 void Session::hotplug()
 {
-    if (connected()) {
+    if (atenControls()) {
         send(QByteArray(1, 0x3a));
     }
 }
@@ -1159,7 +1349,7 @@ void Session::setDisplay(int requestedQuality, int mode)
 {
     quality = qBound(0, requestedQuality, 11);
     imageMode = mode == 422 ? 422 : 444;
-    if (connected()) {
+    if (atenControls()) {
         send(displaySettings(quality, imageMode));
         refresh();
     }
@@ -1182,6 +1372,10 @@ void Session::setStreaming(bool active, int interval, int full)
     streaming = active;
     frameInterval = qBound(0, interval, 1000);
     fullSeconds = qBound(-1, full, 60);
+    if (megaRac) {
+        megaRac->setStreaming(active);
+        return;
+    }
     if (!active) {
         nextFrame.stop();
     } else {
@@ -1194,6 +1388,9 @@ void Session::setStreaming(bool active, int interval, int full)
 
 void Session::setDuplicateEndpoint(bool duplicate)
 {
+    if (megaRac) {
+        return;
+    }
     if (duplicateEndpoint == duplicate) {
         return;
     }
@@ -1226,7 +1423,9 @@ void Session::stopVideoTrace()
 QString Session::information() const
 {
     const double seconds = uptime.isValid() ? uptime.elapsed() / 1000.0 : 0;
-    const auto size = decoder ? decoder->image().size() : QSize();
+    const auto size = megaRac   ? megaRac->size()
+                      : decoder ? decoder->image().size()
+                                : QSize();
     return QString(
                "Endpoint: %1:%2\nTransport: %3\nDisplay: %4 × %5\nInput: "
                "%6\nFrames: %7\nAverage FPS: %8\nVideo received: %9 "

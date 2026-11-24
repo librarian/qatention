@@ -30,7 +30,7 @@ option(QATENTION_MOBILE "Build the Qt Quick mobile interface (also available on 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 find_package(NSS REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
-find_package(Qt6 6.8 REQUIRED COMPONENTS Concurrent)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Concurrent WebSockets)
 if(ANDROID OR QATENTION_MOBILE)
     find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Network Quick QuickControls2)
 else()
@@ -44,6 +44,7 @@ add_library(qatention_core STATIC
     src/core/decoder.cpp src/core/decoder.h
     src/core/protocol.cpp src/core/protocol.h
     src/core/session.cpp src/core/session.h
+    src/core/megarac.cpp src/core/megarac.h
     src/core/profiles.cpp src/core/profiles.h
     src/core/certificatechain.cpp src/core/certificatechain.h
     src/core/nsshttp.cpp src/core/nsshttp.h src/core/nssheaders.h
@@ -55,7 +56,7 @@ add_library(qatention_core STATIC
 target_include_directories(qatention_core PUBLIC src)
 target_compile_definitions(qatention_core PUBLIC QATENTION_VERSION="${QATENTION_VERSION}")
 target_link_libraries(qatention_core PUBLIC Qt6::Core Qt6::Gui Qt6::Network
-    PRIVATE aspeed Qt6::Concurrent NSS::NSS spdlog::spdlog)
+    PRIVATE aspeed Qt6::Concurrent Qt6::WebSockets NSS::NSS spdlog::spdlog)
 if(WIN32)
     target_link_libraries(qatention_core PRIVATE crypt32)
 endif()
@@ -131,6 +132,8 @@ if(NOT CMAKE_CROSSCOMPILING)
     install(SCRIPT ${deploy_script})
 endif()
 install(FILES LICENSE README.md THIRD_PARTY.md DESTINATION ${CMAKE_INSTALL_DATADIR}/qatention)
+install(FILES cmake/patches/qtwebsockets/qt-6.8.3-security.patch
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/qatention/source)
 install(DIRECTORY third_party/aspeed DESTINATION ${CMAKE_INSTALL_DATADIR}/qatention/source)
 
 include(CTest)
@@ -154,7 +157,7 @@ if(BUILD_TESTING)
     add_test(NAME ui COMMAND ui_tests)
     set_tests_properties(ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 20)
     qt_add_executable(core_tests tests/core_tests.cpp)
-    target_link_libraries(core_tests PRIVATE qatention_core Qt6::Test)
+    target_link_libraries(core_tests PRIVATE qatention_core Qt6::Test Qt6::WebSockets)
     qt_add_resources(core_tests core_test_certificates PREFIX /tls FILES
         tests/certificates/root.pem tests/certificates/issuer.pem tests/certificates/leaf.pem tests/certificates/leaf.key)
     add_test(NAME core COMMAND core_tests)

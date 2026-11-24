@@ -157,7 +157,7 @@ void Mobile::applyViewSettings()
 
 void Mobile::mountIso(const QUrl& url)
 {
-    if (!session.connected() || media.busy()) {
+    if (!session.atenControls() || media.busy()) {
         return;
     }
     if (!url.isLocalFile() && url.scheme() != "content") {

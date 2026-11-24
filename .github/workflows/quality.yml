@@ -67,7 +67,10 @@ jobs:
         with:
           version: '6.8.3'
           arch: linux_gcc_64
+          modules: qtwebsockets
           cache: true
+      - name: Build patched Linux Qt WebSockets
+        run: bash scripts/build_qtwebsockets.sh "$QT_ROOT_DIR" "$RUNNER_TEMP/qtwebsockets-linux" lib/libQt6WebSockets.so.6.8.3
       - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           languages: c-cpp
@@ -152,7 +155,10 @@ jobs:
         with:
           version: '6.8.3'
           arch: linux_gcc_64
+          modules: qtwebsockets
           cache: true
+      - name: Build patched Linux Qt WebSockets
+        run: bash scripts/build_qtwebsockets.sh "$QT_ROOT_DIR" "$RUNNER_TEMP/qtwebsockets-linux" lib/libQt6WebSockets.so.6.8.3
       - name: Build instrumented application and tests
         run: |
           cmake -S . -B build-sanitized -G Ninja -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-linux-qatention -DCMAKE_BUILD_TYPE=Debug \

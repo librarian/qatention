@@ -42,6 +42,42 @@ static QRgb rgb555(const char* bytes)
         (pixel & 31U) << 3U);
 }
 
+bool Decoder::decodeAspeed(
+    QByteArrayView data,
+    bool chroma420,
+    quint8 quality,
+    quint8 advancedQuality)
+{
+    if (data.size() < 8 || quality > 11 || advancedQuality > 11) {
+        throw Error("Invalid ASPEED frame");
+    }
+    if (frame.width() > 1920 || frame.height() > 1200) {
+        throw Error("ASPEED supports at most 1920x1200");
+    }
+    // Native input is uint32_t*: provide aligned storage with zero padding.
+    std::vector<uint32_t> words(size_t((data.size() + 3) / 4), 0);
+    std::memcpy(words.data(), data.data(), size_t(data.size()));
+    const int blockSize = chroma420 ? 16 : 8;
+    QByteArray changedBlocks(
+        ((qsizetype(frame.width()) + blockSize - 1) / blockSize) *
+            ((frame.height() + blockSize - 1) / blockSize),
+        0);
+    if (!aspeedDecoder) {
+        aspeedDecoder = std::make_unique<aspeed::Decoder>();
+    }
+    return aspeedDecoder->decode(
+        {{words.data(), words.size()},
+         std::size_t(data.size()),
+         chroma420 ? aspeed::Chroma::Yuv420 : aspeed::Chroma::Yuv444,
+         quality,
+         advancedQuality},
+        {{frame.bits(), std::size_t(frame.sizeInBytes())},
+         unsigned(frame.width()),
+         unsigned(frame.height())},
+        {reinterpret_cast<std::uint8_t*>(changedBlocks.data()),
+         std::size_t(changedBlocks.size())});
+}
+
 bool Decoder::decode(const QByteArray& packet, quint32 encoding)
 {
     if (encoding == 0x57) {
@@ -56,35 +92,11 @@ bool Decoder::decode(const QByteArray& packet, quint32 encoding)
         if (marker != 0x1a6 && marker != 0x1bc) {
             throw Error("Unknown ASPEED chroma mode");
         }
-        if (frame.width() > 1920 || frame.height() > 1200) {
-            throw Error("ASPEED supports at most 1920x1200");
-        }
-        // Native input is uint32_t*: provide aligned storage, including zero
-        // padding for partial words.
-        std::vector<uint32_t> words(size_t((packet.size() - 4 + 3) / 4), 0);
-        std::memcpy(
-            words.data(),
-            packet.constData() + 4,
-            size_t(packet.size() - 4));
-        const int blockSize = marker == 0x1a6 ? 16 : 8;
-        QByteArray changedBlocks(
-            ((qsizetype(frame.width()) + blockSize - 1) / blockSize) *
-                ((frame.height() + blockSize - 1) / blockSize),
-            0);
-        if (!aspeedDecoder) {
-            aspeedDecoder = std::make_unique<aspeed::Decoder>();
-        }
-        return aspeedDecoder->decode(
-            {{words.data(), words.size()},
-             std::size_t(packet.size() - 4),
-             marker == 0x1a6 ? aspeed::Chroma::Yuv420 : aspeed::Chroma::Yuv444,
-             quint8(packet[0]),
-             quint8(packet[1])},
-            {{frame.bits(), std::size_t(frame.sizeInBytes())},
-             unsigned(frame.width()),
-             unsigned(frame.height())},
-            {reinterpret_cast<std::uint8_t*>(changedBlocks.data()),
-             std::size_t(changedBlocks.size())});
+        return decodeAspeed(
+            QByteArrayView(packet).sliced(4),
+            marker == 0x1a6,
+            quint8(packet[0]),
+            quint8(packet[1]));
     }
     if (packet.size() < 10) {
         throw Error("Truncated ATEN header");
