@@ -68,7 +68,7 @@ jobs:
           version: '6.8.3'
           arch: linux_gcc_64
           cache: true
-      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           languages: c-cpp
           build-mode: manual
@@ -83,7 +83,7 @@ jobs:
         run: |
           python scripts/check_cpp.py --build build-quality
           python scripts/check_cpp.py --build build-quality-mobile
-      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         if: ${{ !cancelled() }}
 
   script-security:
@@ -106,12 +106,12 @@ jobs:
           RELEASE_SHA: ${{ inputs.release_sha }}
           RELEASE_ID: ${{ inputs.release_id }}
         run: python3 scripts/release_version.py check-source
-      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           languages: ${{ matrix.language }}
           build-mode: none
           queries: security-extended
-      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
 
   sanitizers:
     runs-on: ubuntu-24.04
