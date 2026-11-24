@@ -44,7 +44,10 @@ jobs:
         with:
           version: '6.8.3'
           arch: linux_gcc_64
+          modules: qtwebsockets
           cache: true
+      - name: Build patched Linux Qt WebSockets
+        run: bash scripts/build_qtwebsockets.sh "$QT_ROOT_DIR" "$RUNNER_TEMP/qtwebsockets-linux" lib/libQt6WebSockets.so.6.8.3
       - name: Test mobile interface on Linux
         run: |
           cmake -S . -B build-mobile -G Ninja -DQATENTION_MOBILE=ON \
@@ -60,12 +63,12 @@ jobs:
           path: |
             qt-android
             openssl-android
-          key: android-arm64-qt6.8.3-ndk26.1-openssl3.5.9-v2
+          key: android-arm64-qt6.8.3-ndk26.1-openssl3.5.9-v3
       - name: Prepare Android libraries
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
           python -m pip install -r tools/requirements-build.txt
-          python -m aqt install-qt linux android 6.8.3 android_arm64_v8a -O qt-android
+          python -m aqt install-qt all_os android 6.8.3 android_arm64_v8a -O qt-android -m qtwebsockets
           bash scripts/build_android_openssl.sh openssl-android openssl-work "$ANDROID_HOME/ndk/26.1.10909125"
       - name: Save prepared Android libraries
         if: steps.cache.outputs.cache-hit != 'true'
@@ -74,12 +77,19 @@ jobs:
           path: |
             qt-android
             openssl-android
-          key: android-arm64-qt6.8.3-ndk26.1-openssl3.5.9-v2
+          key: android-arm64-qt6.8.3-ndk26.1-openssl3.5.9-v3
       - name: Include Qt licenses
         run: |
           for name in LGPL-3.0-only GPL-3.0-only; do
             curl --fail --location "https://raw.githubusercontent.com/qt/qtbase/v6.8.3/LICENSES/$name.txt" -o "openssl-android/$name.txt"
           done
+      - name: Build patched Android Qt WebSockets
+        run: |
+          qt="$PWD/qt-android/6.8.3/android_arm64_v8a"
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/26.1.10909125"
+          bash scripts/build_qtwebsockets.sh "$qt" "$RUNNER_TEMP/qtwebsockets-android" lib/libQt6WebSockets_arm64-v8a.so \
+            -DCMAKE_TOOLCHAIN_FILE="$qt/lib/cmake/Qt6/qt.toolchain.cmake" \
+            -DANDROID_SDK_ROOT="$ANDROID_HOME" -DANDROID_NDK_ROOT="$ANDROID_NDK_HOME" -DQT_HOST_PATH="$QT_ROOT_DIR"
       - name: Build APK
         run: |
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/26.1.10909125"

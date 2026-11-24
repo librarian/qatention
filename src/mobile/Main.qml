@@ -33,10 +33,10 @@ ApplicationWindow {
                     y: menuButton.height
                     MenuItem { text: "View settings"; onTriggered: viewDialog.open() }
                     MenuItem { text: "Virtual media"; onTriggered: mediaDialog.open() }
-                    MenuItem { text: "Power"; enabled: connection.connected; onTriggered: powerDialog.open() }
+                    MenuItem { text: "Power"; enabled: connection.atenControls; onTriggered: powerDialog.open() }
                     MenuSeparator { }
                     MenuItem { text: "Ctrl+Alt+Delete"; enabled: connection.connected; onTriggered: connection.ctrlAltDelete() }
-                    MenuItem { text: "USB hotplug"; enabled: connection.connected; onTriggered: mobile.hotplug() }
+                    MenuItem { text: "USB hotplug"; enabled: connection.atenControls; onTriggered: mobile.hotplug() }
                     MenuItem { text: "Debug log"; onTriggered: logs.open() }
                 }
             }
@@ -241,7 +241,7 @@ ApplicationWindow {
                 Label { text: mobile.mediaStatus; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 Label { text: "Keep the app open while using a mounted ISO."; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 RowLayout {
-                    Button { text: "Mount ISO…"; enabled: connection.connected && !mobile.mediaBusy; onClicked: isoPicker.open() }
+                    Button { text: "Mount ISO…"; enabled: connection.atenControls && !mobile.mediaBusy; onClicked: isoPicker.open() }
                     Button { text: "Unmount"; enabled: mobile.mediaBusy; onClicked: mobile.unmountIso() }
                 }
             }

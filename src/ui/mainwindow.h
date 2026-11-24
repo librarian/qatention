@@ -43,7 +43,7 @@ private:
     QTabWidget* tabs;
     QDockWidget* logDock;
     QList<Tab*> sessions;
-    QList<QAction*> onlineActions;
+    QList<QAction*> onlineActions, atenActions;
     QAction *actualAction, *smoothAction, *backgroundAction, *reopenAction,
         *reconnectAction, *mountAction, *unmountAction;
     int fps = 0, fullSeconds = 5, quality = 11, mode = 444;

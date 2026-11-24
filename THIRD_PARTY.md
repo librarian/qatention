@@ -9,6 +9,14 @@ Reference sources inspected for this initial port:
 - Existing ATENtion checkout, commit `a99e97f500c8d7ca98dfb4bb836fc1dc3b86483d`,
   including the later per-session ASPEED context/block-map API and protocol fixes.
 
+MegaRAC console support was checked against the ASUS BMC's H5Viewer traffic
+and the protocol notes and implementations in
+[asus-ipmi-mcp](https://github.com/onprem-ai/asus-ipmi-mcp) at
+`e5ab28f6c63e28b4109fddd7ca193106f603c30d` and
+[megarac-kvm-rs](https://github.com/stevenjoezhang/megarac-kvm-rs) at
+`815fda1da9835f1a05ef6cc1aeebbd502468cf90`. The client uses QATENtion's native
+ASPEED decoder.
+
 `third_party/aspeed/{decoder.cpp,decoder.h,tables.h}` derive from ASPEED
 Technology's reference decoder via the latter ATENtion checkout. They retain
 its MPL-2.0 attribution and license in `third_party/aspeed/LICENSE`.
@@ -33,11 +41,17 @@ vendor identity, extracted from that PFX for TLS backends without a PKCS#12
 importer (including Qt SecureTransport). Custom PFX overrides still require a
 backend with PKCS#12 import support.
 
-Qt is dynamically linked. This port uses Qt Core, Gui, Network, Concurrent and Widgets, plus Qt Test for tests. Qt and its bundled dependencies retain
+Qt is dynamically linked. This port uses Qt Core, Gui, Network, Concurrent, WebSockets and Widgets, plus Qt Test for tests. Qt and its bundled dependencies retain
 their own licenses; see https://doc.qt.io/qt-6.8/licensing.html . Development
 archives include Qt's LGPL/GPL license texts. Exact Qt source releases are at
 https://download.qt.io/archive/qt/6.8/6.8.3/single/ . Do not treat the application's
 MIT license as replacing Qt's or ASPEED's license.
+
+Release builds rebuild Qt WebSockets 6.8.3 with Qt's fixes for CVE-2026-114366 and
+CVE-2026-114369. The [original Qt WebSockets source](https://download.qt.io/archive/qt/6.8/6.8.3/submodules/qtwebsockets-everywhere-src-6.8.3.tar.xz),
+[backported patch](cmake/patches/qtwebsockets/qt-6.8.3-security.patch), and
+[build script](scripts/build_qtwebsockets.sh) describe the exact module in the
+packages. The deployed Qt module retains Qt's LGPL/GPL terms.
 
 NSS and NSPR (MPL-2.0), spdlog (MIT), fmt (MIT), SQLite (public domain), and
 zlib (Zlib license) are managed by the pinned vcpkg manifest. NSS and NSPR are

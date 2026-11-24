@@ -1,18 +1,21 @@
 #include "core/debuglog.h"
 #include "core/decoder.h"
 #include "core/media.h"
+#include "core/megarac.h"
 #include "core/profiles.h"
 #include "core/protocol.h"
 #include "core/session.h"
 
 #include <QFile>
 #include <QMessageAuthenticationCode>
+#include <QNetworkRequest>
 #include <QSignalSpy>
 #include <QSslConfiguration>
 #include <QSslKey>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
+#include <QWebSocketServer>
 #include <QtEndian>
 #include <QtTest>
 
@@ -620,6 +623,80 @@ private slots:
         auto bad = white;
         bad[0] = 12;
         QVERIFY_EXCEPTION_THROWN(first.decode(bad, 0x57), Error);
+    }
+
+    void megaRacFragmentedVideoAndInput()
+    {
+        QWebSocketServer server("fixture", QWebSocketServer::NonSecureMode);
+        server.setSupportedSubprotocols({"binary"});
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        MegaRac client("https://localhost", this);
+        QSignalSpy ready(&client, &MegaRac::ready);
+        QSignalSpy frames(&client, &MegaRac::frameReady);
+        QSignalSpy failures(&client, &MegaRac::failed);
+        client.open(
+            QNetworkRequest(server.serverUrl()),
+            {{"token", "fixture"}, {"session", "fixture"}});
+        QTRY_VERIFY(server.hasPendingConnections());
+        std::unique_ptr<QWebSocket> peer(server.nextPendingConnection());
+        QSignalSpy packets(peer.get(), &QWebSocket::binaryMessageReceived);
+
+        const auto packet =
+            [](quint16 type, quint16 status, const QByteArray& payload)
+        {
+            QByteArray bytes(8, 0);
+            qToLittleEndian(type, bytes.data());
+            qToLittleEndian(quint32(payload.size()), bytes.data() + 2);
+            qToLittleEndian(status, bytes.data() + 6);
+            bytes.append(payload);
+            return bytes;
+        };
+        const auto allowed = packet(23, 2, {});
+        peer->sendBinaryMessage(allowed.first(3));
+        peer->sendBinaryMessage(allowed.sliced(3));
+        QTRY_COMPARE(packets.size(), 1);
+        const auto validation = packets.takeFirst().first().toByteArray();
+        QCOMPARE(validation.size(), 462);
+        QCOMPARE(qFromLittleEndian<quint16>(validation.constData() + 8), 18);
+
+        peer->sendBinaryMessage(packet(19, 0, QByteArray::fromHex("0101")));
+        QTRY_COMPARE(ready.size(), 1);
+        QCOMPARE(ready.first().first().toBool(), false);
+        QTRY_COMPARE(packets.size(), 2);
+        packets.clear();
+        client.key(0xe1, true);
+        peer->sendBinaryMessage(packet(50, 6, {}));
+        QTRY_COMPARE(ready.size(), 2);
+        QCOMPARE(ready.last().first().toBool(), true);
+        QCOMPARE(packets.size(), 0);
+
+        QByteArray header(88, 0);
+        qToLittleEndian(quint16(8), header.data() + 6);
+        qToLittleEndian(quint16(8), header.data() + 8);
+        qToLittleEndian(quint32(8), header.data() + 71);
+        const auto white = QByteArray::fromHex("0000205300000000");
+        peer->sendBinaryMessage(packet(25, 0, header + white.first(4)));
+        peer->sendBinaryMessage(
+            packet(25, 0, QByteArray(2, 0) + white.sliced(4)));
+        QTRY_COMPARE(frames.size(), 1);
+        auto image = qvariant_cast<QImage>(frames.first().first());
+        QCOMPARE(image.size(), QSize(8, 8));
+        QCOMPARE(image.pixel(0, 0), qRgb(255, 255, 255));
+
+        client.key(0xe1, true);
+        client.releaseInput();
+        QTRY_COMPARE(packets.size(), 2);
+        const auto press = packets.first().first().toByteArray();
+        const auto release = packets.last().first().toByteArray();
+        QCOMPARE(press.sliced(41), QByteArray::fromHex("0200000000000000"));
+        QCOMPARE(release.sliced(41), QByteArray(8, 0));
+        quint8 checksum = 0;
+        for (const auto byte: QByteArrayView(press).sliced(8, 32)) {
+            checksum = quint8(checksum + quint8(byte));
+        }
+        QCOMPARE(checksum, 0);
+        QCOMPARE(failures.size(), 0);
+        client.close();
     }
 
     void concurrentSessionsRecoverStalledVideo()

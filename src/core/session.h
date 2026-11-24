@@ -15,11 +15,14 @@
 #include <functional>
 
 namespace aten {
+class MegaRac;
+
 class Session: public QObject
 {
     Q_OBJECT
     Q_PROPERTY(bool busy READ busy NOTIFY stateChanged)
     Q_PROPERTY(bool connected READ connected NOTIFY stateChanged)
+    Q_PROPERTY(bool atenControls READ atenControls NOTIFY stateChanged)
     Q_PROPERTY(QString status READ status NOTIFY stateChanged)
 public:
     explicit Session(QObject* parent = nullptr);
@@ -39,6 +42,11 @@ public:
     bool connected() const
     {
         return phase == Phase::Messages;
+    }
+
+    bool atenControls() const
+    {
+        return connected() && !megaRac;
     }
 
     QString status() const
@@ -123,6 +131,8 @@ private:
     QPointer<QSslSocket> socket;
     QPointer<QNetworkReply> reply;
     QPointer<QObject> issuerFetch;
+    MegaRac* megaRac = nullptr;
+    QByteArray megaRacCsrf;
     QNetworkAccessManager web;
     QTimer deadline, heartbeat, nextFrame, retry;
     QVariantMap reconnectOptions, consoleTrust;
@@ -166,7 +176,9 @@ private:
         Login,
         ConsoleMenu,
         ConfigureJava,
-        Launch
+        Launch,
+        MegaRacLogin,
+        MegaRacConfig
     };
     void requestWeb(
         const QString& path,
@@ -175,5 +187,8 @@ private:
         const QByteArray& csrf = {},
         bool chainRetried = false);
     void handleWeb(const QByteArray& body, WebStep step);
+    void connectMegaRac(
+        const QJsonObject& config,
+        const QSslConfiguration& ssl);
 };
 }   // namespace aten

@@ -27,10 +27,22 @@ See [docs/PARITY.md](docs/PARITY.md) for the reference baseline and remaining
 differences. Automated checks use synthetic BMC transcripts; real hardware booting
 from a mounted ISO is not established by those checks.
 
+## ASUS MegaRAC consoles
+
+With automatic connection enabled, QATENtion tries the AMI MegaRAC HTTPS login
+when the Supermicro login endpoint returns HTTP 404. Use the BMC hostname, HTTPS
+port and web credentials. The console uses the same HTTPS origin for its secure
+WebSocket and requires a certificate trusted by the client.
+
+Video, keyboard, mouse, screenshots, and reconnect are supported. Power
+commands, virtual media, USB hotplug, and ATEN video tuning apply only to ATEN
+sessions. Use the ASUS BMC web interface for MegaRAC management operations.
+
 ## Build
 
-Install Qt 6.8.3 (Core, Gui, Network, Concurrent, Widgets and Test),
-CMake 3.24+, Ninja, and a C/C++ compiler. CI pins Qt to 6.8.3.
+Install Qt 6.8.3 (Core, Gui, Network, Concurrent, WebSockets, Widgets and Test),
+CMake 3.24+, Ninja, and a C/C++ compiler. CI rebuilds Qt WebSockets 6.8.3 using
+the upstream security fixes described in [THIRD_PARTY.md](THIRD_PARTY.md).
 
 ```sh
 python3 scripts/setup_vcpkg.py

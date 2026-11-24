@@ -410,7 +410,11 @@ void MainWindow::updateTabs()
     for (auto* action: onlineActions) {
         action->setEnabled(online);
     }
-    mountAction->setEnabled(online && !active->media->busy());
+    const bool aten = active && active->session->atenControls();
+    for (auto* action: atenActions) {
+        action->setEnabled(aten);
+    }
+    mountAction->setEnabled(aten && !active->media->busy());
     unmountAction->setEnabled(active && active->media->busy());
     if (auto* status = findChild<QAction*>("mediaStatus")) {
         status->setText(active ? active->media->status() : "No session");
@@ -501,7 +505,7 @@ void MainWindow::makeMenus()
         "Reset",
         "Soft off (ACPI)"};
     for (int code: {1, 0, 2, 3}) {
-        action(
+        atenActions.append(action(
             power,
             powerNames[code],
             [this, code, powerNames]
@@ -518,8 +522,7 @@ void MainWindow::makeMenus()
                 {
                     t->session->power(code);
                 }
-            },
-            true);
+            }));
     }
     auto* keys = menuBar()->addMenu("&Keys");
     action(
@@ -588,7 +591,7 @@ void MainWindow::makeMenus()
         true);
     keys->addSeparator();
     action(keys, "Screenshot…", [this] { screenshot(); }, true);
-    action(
+    atenActions.append(action(
         keys,
         "Keyboard / Mouse HotPlug",
         [this]
@@ -596,8 +599,7 @@ void MainWindow::makeMenus()
             if (current()) {
                 current()->session->hotplug();
             }
-        },
-        true);
+        }));
     auto* mouse = menuBar()->addMenu("&Mouse");
     auto* absolute = mouse->addAction("Absolute");
     absolute->setCheckable(true);
@@ -1231,7 +1233,7 @@ void MainWindow::screenshot()
 void MainWindow::mountIso(const QString& path)
 {
     auto* t = current();
-    if (!t || !t->session->connected()) {
+    if (!t || !t->session->atenControls()) {
         return;
     }
     if (!smoke) {

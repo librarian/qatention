@@ -53,6 +53,7 @@ jobs:
         with:
           version: '6.8.3'
           arch: linux_gcc_64
+          modules: qtwebsockets
           cache: true
       - name: Cache Windows SDK and OpenSSL
         if: matrix.target == 'windows-x64'
@@ -62,13 +63,21 @@ jobs:
           path: |
             qt-windows
             openssl-windows
-          key: ubuntu24-mingw-qt6.8.3-openssl3.5.9-v1
+          key: ubuntu24-mingw-qt6.8.3-openssl3.5.9-v2
       - name: Install Windows SDK and build OpenSSL
         if: matrix.target == 'windows-x64' && steps.windows-cache.outputs.cache-hit != 'true'
         run: |
           python -m pip install -r tools/requirements-build.txt
-          python -m aqt install-qt windows desktop 6.8.3 win64_mingw -O qt-windows
+          python -m aqt install-qt windows desktop 6.8.3 win64_mingw -O qt-windows -m qtwebsockets
           bash scripts/build_windows_openssl.sh "$PWD/openssl-windows" "$RUNNER_TEMP/openssl-build"
+      - name: Build patched Linux Qt WebSockets
+        if: matrix.target == 'linux-x64'
+        run: bash scripts/build_qtwebsockets.sh "$QT_ROOT_DIR" "$RUNNER_TEMP/qtwebsockets-linux" lib/libQt6WebSockets.so.6.8.3
+      - name: Build patched Windows Qt WebSockets
+        if: matrix.target == 'windows-x64'
+        run: |
+          bash scripts/build_qtwebsockets.sh qt-windows/6.8.3/mingw_64 "$RUNNER_TEMP/qtwebsockets-windows" bin/Qt6WebSockets.dll \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/cmake/toolchains/mingw64.cmake" -DQT_HOST_PATH="$QT_ROOT_DIR"
       - name: Configure
         run: |
           args=(-DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"

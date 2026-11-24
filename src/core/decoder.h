@@ -18,6 +18,11 @@ public:
     Decoder& operator=(const Decoder&) = delete;
     void resize(QSize size);
     bool decode(const QByteArray& packet, quint32 encoding);
+    bool decodeAspeed(
+        QByteArrayView data,
+        bool chroma420,
+        quint8 quality,
+        quint8 advancedQuality);
 
     const QImage& image() const
     {
