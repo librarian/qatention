@@ -90,6 +90,24 @@ jobs:
           bash scripts/build_qtwebsockets.sh "$qt" "$RUNNER_TEMP/qtwebsockets-android" lib/libQt6WebSockets_arm64-v8a.so \
             -DCMAKE_TOOLCHAIN_FILE="$qt/lib/cmake/Qt6/qt.toolchain.cmake" \
             -DANDROID_SDK_ROOT="$ANDROID_HOME" -DANDROID_NDK_ROOT="$ANDROID_NDK_HOME" -DQT_HOST_PATH="$QT_ROOT_DIR"
+      - name: Configure the Maven Central mirror
+        run: |
+          # Maven Central rate-limits GitHub-hosted runners. Use Google's
+          # hosted mirror for Central in Qt's generated Gradle project.
+          gradle_init="${GRADLE_USER_HOME:-$HOME/.gradle}/init.d"
+          mkdir -p "$gradle_init"
+          cat > "$gradle_init/qatention-maven-central.gradle" <<'EOF'
+          gradle.beforeProject { project ->
+              [project.buildscript.repositories, project.repositories].each { repos ->
+                  repos.withType(MavenArtifactRepository).configureEach { repo ->
+                      if (repo.url?.host == 'repo.maven.apache.org' &&
+                          repo.url.path in ['/maven2', '/maven2/']) {
+                          repo.url = 'https://maven-central.storage-download.googleapis.com/maven2/'
+                      }
+                  }
+              }
+          }
+          EOF
       - name: Build APK
         run: |
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/26.1.10909125"
