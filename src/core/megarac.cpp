@@ -31,6 +31,9 @@ enum Command : quint16
     ConnectionAllowed = 23,
     Video = 25,
     Sharing = 32,
+    PowerStatus = 34,
+    PowerRequest = 35,
+    PowerResponse = 36,
     ActiveClients = 39,
     NextMaster = 50,
     KeepAlive = 57,
@@ -64,6 +67,13 @@ MegaRac::MegaRac(const QString& origin, QObject* parent)
     : QObject(parent)
     , socket(origin)
 {
+    powerDeadline.setSingleShot(true);
+    connect(
+        &powerDeadline,
+        &QTimer::timeout,
+        this,
+        [this]
+        { emit powerResult("No response to the MegaRAC power command"); });
     socket.setMaxAllowedIncomingFrameSize(MaxPayload);
     socket.setMaxAllowedIncomingMessageSize(MaxPayload);
     connect(
@@ -200,6 +210,7 @@ void MegaRac::handle(quint16 type, quint16 status, QByteArrayView payload)
             send(WebToken, 0, field(config.value("session").toString(), 35));
             config = {};
             emit ready(false);
+            queryPower();
             refresh();
             return;
         case SessionLimit:
@@ -229,6 +240,17 @@ void MegaRac::handle(quint16 type, quint16 status, QByteArrayView payload)
             }
             break;
         }
+        case PowerStatus:
+            emit powerState(status <= 1 ? int(status) : -1);
+            break;
+        case PowerResponse:
+            if (powerDeadline.isActive()) {
+                powerDeadline.stop();
+                emit powerResult(
+                    status == 0 ? "Power command accepted"
+                                : "BMC rejected the power command");
+            }
+            break;
         case MouseMode:
             if (!payload.isEmpty()) {
                 mouseMode = quint8(payload[0]);
@@ -297,6 +319,25 @@ void MegaRac::refresh()
 {
     if (validated && streaming) {
         send(FullScreen, 1);
+    }
+}
+
+void MegaRac::queryPower()
+{
+    if (validated && !powerDeadline.isActive()) {
+        send(PowerStatus);
+    }
+}
+
+void MegaRac::power(int command)
+{
+    // Map the shared menu commands to AMI immediate off, on, hard reset,
+    // and orderly shutdown. AMI also has a separate power-cycle opcode.
+    static constexpr quint16 commands[] = {0, 1, 3, 5};
+    if (controlling && !powerDeadline.isActive() && command >= 0 && command < 4)
+    {
+        powerDeadline.start(10000);
+        send(PowerRequest, commands[command]);
     }
 }
 

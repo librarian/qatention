@@ -53,6 +53,7 @@ Mobile::Mobile()
         });
     insetTimer.start();
 #endif
+    connect(&session, &aten::Session::powerResult, this, &Mobile::notice);
     connect(
         &session,
         &aten::Session::stateChanged,
@@ -157,7 +158,7 @@ void Mobile::applyViewSettings()
 
 void Mobile::mountIso(const QUrl& url)
 {
-    if (!session.atenControls() || media.busy()) {
+    if (!session.mediaControls() || media.busy()) {
         return;
     }
     if (!url.isLocalFile() && url.scheme() != "content") {
@@ -178,11 +179,7 @@ void Mobile::mountIso(const QUrl& url)
         return;
     }
     file.close();
-    media.mount(
-        session.mediaEndpoint(),
-        session.untrustedAllowed(),
-        path,
-        session.mediaTrustedCertificate());
+    session.mountMedia(media, path);
 }
 
 void Mobile::unmountIso()

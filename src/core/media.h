@@ -8,6 +8,9 @@
 #include <QSslSocket>
 #include <QTimer>
 
+class QNetworkRequest;
+class QWebSocket;
+
 namespace aten {
 class Media: public QObject
 {
@@ -20,6 +23,10 @@ public:
         bool allowUntrusted,
         const QString& path,
         const QSslCertificate& trustedCertificate = QSslCertificate());
+    void mountMegaRac(
+        const QNetworkRequest& request,
+        const QByteArray& token,
+        const QString& path);
     void unmount();
     void probe(
         const Launch& endpoint,
@@ -64,6 +71,8 @@ private:
     bool trust = false, probeOnly = false;
     QString message = "No media mounted", isoPath;
     QPointer<QSslSocket> channel, data;
+    QPointer<QWebSocket> mediaSocket;
+    quint8 megaRacInstance = 0;
     QByteArray buffer;
     QTimer deadline, keepalive;
     std::unique_ptr<CdRom> cd;
@@ -72,6 +81,10 @@ private:
     void consume();
     void send(const QByteArray& bytes);
     void stop(const QString& reason);
+    void sendMegaRac(const QByteArray& packet);
+    void receiveMegaRac(const QByteArray& bytes);
+    void handleMegaRac(QByteArrayView packet);
+    void detachMegaRac();
 };
 
 void configureClientTls(QSslSocket* socket);

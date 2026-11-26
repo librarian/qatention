@@ -3,6 +3,7 @@
 #include <QCoreApplication>
 #include <QRandomGenerator>
 #include <QSslKey>
+#include <QWebSocket>
 
 namespace aten {
 void configureClientTls(QSslSocket* socket)
@@ -77,6 +78,9 @@ Media::Media(QObject* parent)
 Media::~Media()
 {
     blockSignals(true);
+    if (mediaSocket) {
+        detachMegaRac();
+    }
     if (data) {
         data->write(mediaControl(MediaControl::Detach));
     }
@@ -100,6 +104,13 @@ void Media::stop(const QString& reason)
     }
     channel = nullptr;
     data = nullptr;
+    if (mediaSocket) {
+        mediaSocket->disconnect(this);
+        mediaSocket->close();
+        mediaSocket->deleteLater();
+        mediaSocket = nullptr;
+    }
+    megaRacInstance = 0;
     buffer.clear();
     cd.reset();
     launch = {};
@@ -159,7 +170,15 @@ void Media::probe(
 
 void Media::unmount()
 {
-    if (phase == Serving) {
+    if (mediaSocket) {
+        if (phase == Serving) {
+            phase = Detach;
+            detachMegaRac();
+            deadline.start(1000);
+        } else if (phase != Detach) {
+            stop("Media unmounted");
+        }
+    } else if (phase == Serving) {
         keepalive.stop();
         phase = Detach;
         send(mediaControl(MediaControl::Detach));

@@ -90,6 +90,11 @@ public:
         const QByteArray& commandBytes,
         quint32 allocationLength);
 
+    ScsiSense lastSense() const
+    {
+        return sense;
+    }
+
     quint64 blocks() const
     {
         return (quint64(file.size()) + BlockSize - 1) / BlockSize;

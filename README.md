@@ -34,9 +34,12 @@ when the Supermicro login endpoint returns HTTP 404. Use the BMC hostname, HTTPS
 port and web credentials. The console uses the same HTTPS origin for its secure
 WebSocket and requires a certificate trusted by the client.
 
-Video, keyboard, mouse, screenshots, and reconnect are supported. Power
-commands, virtual media, USB hotplug, and ATEN video tuning apply only to ATEN
-sessions. Use the ASUS BMC web interface for MegaRAC management operations.
+MegaRAC supports video, keyboard, mouse, screenshots, and reconnect. The
+controlling session can read the host power state and use the Power menu for
+power on, immediate off, hard reset, and orderly shutdown. Use **Storage >
+Mount ISO…** to stream a local ISO as a read-only virtual CD-ROM over the same
+trusted HTTPS origin. The BMC must offer a virtual CD drive. The existing
+`qatention-capture --mount-iso` command also supports this path.
 
 ## Build
 

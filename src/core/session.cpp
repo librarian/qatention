@@ -80,6 +80,10 @@ Session::Session(QObject* parent)
                 return;
             }
             if (megaRac) {
+                if (powerPoll.elapsed() >= 10000) {
+                    megaRac->queryPower();
+                    powerPoll.restart();
+                }
                 return;
             }
             send(consoleHeartbeat());
@@ -241,6 +245,9 @@ void Session::resetTransport()
     }
     web.setCookieJar(new QNetworkCookieJar(&web));
     megaRacCsrf.clear();
+    megaRacMediaToken.clear();
+    megaRacMediaRequest = {};
+    powerState = -1;
     tlsFailure.clear();
     consoleCandidate = QSslCertificate();
     buffer.clear();
@@ -660,16 +667,53 @@ void Session::connectMegaRac(
     // including its trust anchors. The WSS peer is the same origin.
     request.setSslConfiguration(configuration);
     request.setRawHeader("Cookie", cookies);
+    // Older firmware omits kvm_num_cd and reports the shared CD drive count.
+    const auto cdCount = config.contains("kvm_num_cd")
+                             ? config.value("kvm_num_cd")
+                             : config.value("num_cd");
+    if (cdCount.toVariant().toInt() > 0) {
+        megaRacMediaToken = config.value("token").toString().toLatin1();
+        megaRacMediaRequest = request;
+        auto mediaUrl = url;
+        mediaUrl.setPath("/cd-server");
+        megaRacMediaRequest.setUrl(mediaUrl);
+    }
     auto origin = baseUrl;
     if (origin.port() == 443) {
         origin.setPort(-1);
     }
     // Each attempt gets a fresh socket and only uses it for this origin.
-    megaRac = new MegaRac(origin.toString(QUrl::FullyEncoded), this);
+    const auto originText = origin.toString(QUrl::FullyEncoded);
+    megaRacMediaRequest.setRawHeader("Origin", originText.toUtf8());
+    megaRac = new MegaRac(originText, this);
     phase = Phase::Connecting;
     controlling = false;
     setStatus("Connecting to MegaRAC console…");
     connect(megaRac, &MegaRac::failed, this, &Session::fail);
+    connect(
+        megaRac,
+        &MegaRac::powerState,
+        this,
+        [this](int state)
+        {
+            if (powerState != state) {
+                powerState = state;
+                const QString reported = state < 0    ? "unknown"
+                                         : state == 0 ? "off"
+                                                      : "on";
+                emit diagnostic("MegaRAC host power: " + reported);
+                emit stateChanged();
+            }
+        });
+    connect(
+        megaRac,
+        &MegaRac::powerResult,
+        this,
+        [this](const QString& message)
+        {
+            emit diagnostic(message);
+            emit powerResult(message);
+        });
     connect(
         megaRac,
         &MegaRac::activity,
@@ -692,6 +736,7 @@ void Session::connectMegaRac(
                 established = true;
                 deadline.stop();
                 uptime.start();
+                powerPoll.start();
                 received.start();
                 heartbeat.start();
                 frames = 0;
@@ -719,6 +764,43 @@ void Session::connectMegaRac(
         });
     deadline.start(15000);
     megaRac->open(request, config);
+}
+
+bool Session::powerControls() const
+{
+    return connected() && (!megaRac || megaRac->hasControl());
+}
+
+bool Session::mediaControls() const
+{
+    return connected() && (!megaRac || (megaRac->hasControl() &&
+                                        !megaRacMediaToken.isEmpty()));
+}
+
+void Session::mountMedia(Media& media, const QString& path)
+{
+    if (!mediaControls()) {
+        return;
+    }
+    if (megaRac) {
+        media.mountMegaRac(megaRacMediaRequest, megaRacMediaToken, path);
+    } else {
+        media.mount(
+            mediaEndpoint(),
+            untrustedAllowed(),
+            path,
+            mediaTrustedCertificate());
+    }
+}
+
+void Session::probeMedia(Media& media)
+{
+    if (atenControls()) {
+        media.probe(
+            mediaEndpoint(),
+            untrustedAllowed(),
+            mediaTrustedCertificate());
+    }
 }
 
 QSslCertificate Session::mediaTrustedCertificate() const
@@ -1319,7 +1401,12 @@ void Session::ctrlAltDelete()
 namespace aten {
 void Session::power(int command)
 {
-    if (atenControls() && command >= 0 && command <= 3) {
+    if (!powerControls() || command < 0 || command > 3) {
+        return;
+    }
+    if (megaRac) {
+        megaRac->power(command);
+    } else {
         QByteArray request(2, 0);
         request[0] = 0x1a;   // Power command: off/on/reset/ACPI in byte 1.
         request[1] = char(command);
