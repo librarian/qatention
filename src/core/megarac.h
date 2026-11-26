@@ -4,6 +4,7 @@
 
 #include <QJsonObject>
 #include <QSet>
+#include <QTimer>
 #include <QWebSocket>
 
 #include <optional>
@@ -18,6 +19,14 @@ public:
     void open(const QNetworkRequest& request, const QJsonObject& config);
     void close();
     void refresh();
+    void queryPower();
+    void power(int command);
+
+    bool hasControl() const
+    {
+        return controlling;
+    }
+
     void setStreaming(bool active);
     void key(quint32 usage, bool down);
     void pointer(int x, int y, unsigned mask);
@@ -33,9 +42,12 @@ signals:
     void ready(bool controlling);
     void failed(const QString& message, bool transient);
     void frameReady(const QImage& frame);
+    void powerState(int state);
+    void powerResult(const QString& message);
 
 private:
     QWebSocket socket;
+    QTimer powerDeadline;
     QJsonObject config;
     Decoder decoder;
     QByteArray input, compressed;

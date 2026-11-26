@@ -323,6 +323,16 @@ MainWindow::Tab* MainWindow::addTab(const QString& name)
         &aten::DebugLog::capture);
     connect(t->media, &aten::Media::diagnostic, this, diagnostic);
     connect(
+        t->session,
+        &aten::Session::powerResult,
+        this,
+        [this, t](const QString& message)
+        {
+            if (current() == t) {
+                statusBar()->showMessage(message, 5000);
+            }
+        });
+    connect(
         t->media,
         &aten::Media::changed,
         this,
@@ -414,7 +424,11 @@ void MainWindow::updateTabs()
     for (auto* action: atenActions) {
         action->setEnabled(aten);
     }
-    mountAction->setEnabled(aten && !active->media->busy());
+    for (auto* action: powerActions) {
+        action->setEnabled(active && active->session->powerControls());
+    }
+    mountAction->setEnabled(
+        active && active->session->mediaControls() && !active->media->busy());
     unmountAction->setEnabled(active && active->media->busy());
     if (auto* status = findChild<QAction*>("mediaStatus")) {
         status->setText(active ? active->media->status() : "No session");
@@ -505,7 +519,7 @@ void MainWindow::makeMenus()
         "Reset",
         "Soft off (ACPI)"};
     for (int code: {1, 0, 2, 3}) {
-        atenActions.append(action(
+        powerActions.append(action(
             power,
             powerNames[code],
             [this, code, powerNames]
@@ -890,10 +904,7 @@ void MainWindow::makeMenus()
             if (auto* t = current();
                 t && t->session->connected() && !t->media->busy())
             {
-                t->media->probe(
-                    t->session->mediaEndpoint(),
-                    t->session->untrustedAllowed(),
-                    t->session->mediaTrustedCertificate());
+                t->session->probeMedia(*t->media);
             }
         });
     connect(
@@ -1233,17 +1244,13 @@ void MainWindow::screenshot()
 void MainWindow::mountIso(const QString& path)
 {
     auto* t = current();
-    if (!t || !t->session->atenControls()) {
+    if (!t || !t->session->mediaControls()) {
         return;
     }
     if (!smoke) {
         settings.setValue("isoDirectory", QFileInfo(path).absolutePath());
     }
-    t->media->mount(
-        t->session->mediaEndpoint(),
-        t->session->untrustedAllowed(),
-        path,
-        t->session->mediaTrustedCertificate());
+    t->session->mountMedia(*t->media, path);
 }
 
 void MainWindow::saveSettings()

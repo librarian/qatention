@@ -633,6 +633,8 @@ private slots:
         MegaRac client("https://localhost", this);
         QSignalSpy ready(&client, &MegaRac::ready);
         QSignalSpy frames(&client, &MegaRac::frameReady);
+        QSignalSpy powerStates(&client, &MegaRac::powerState);
+        QSignalSpy powerResults(&client, &MegaRac::powerResult);
         QSignalSpy failures(&client, &MegaRac::failed);
         client.open(
             QNetworkRequest(server.serverUrl()),
@@ -662,13 +664,29 @@ private slots:
         peer->sendBinaryMessage(packet(19, 0, QByteArray::fromHex("0101")));
         QTRY_COMPARE(ready.size(), 1);
         QCOMPARE(ready.first().first().toBool(), false);
-        QTRY_COMPARE(packets.size(), 2);
+        QTRY_COMPARE(packets.size(), 3);
+        QCOMPARE(packets.at(1).first().toByteArray(), packet(34, 0, {}));
         packets.clear();
+        peer->sendBinaryMessage(packet(34, 1, {}));
+        QTRY_COMPARE(powerStates.size(), 1);
+        QCOMPARE(powerStates.first().first().toInt(), 1);
+        client.power(2);
         client.key(0xe1, true);
         peer->sendBinaryMessage(packet(50, 6, {}));
         QTRY_COMPARE(ready.size(), 2);
         QCOMPARE(ready.last().first().toBool(), true);
         QCOMPARE(packets.size(), 0);
+        for (int command = 0; command < 4; ++command) {
+            const quint16 expected[] = {0, 1, 3, 5};
+            client.power(command);
+            client.power(command);
+            QTRY_COMPARE(packets.size(), 1);
+            QCOMPARE(
+                packets.takeFirst().first().toByteArray(),
+                packet(35, expected[command], {}));
+            peer->sendBinaryMessage(packet(36, 0, {}));
+            QTRY_COMPARE(powerResults.size(), command + 1);
+        }
 
         QByteArray header(88, 0);
         qToLittleEndian(quint16(8), header.data() + 6);
@@ -697,6 +715,111 @@ private slots:
         QCOMPARE(checksum, 0);
         QCOMPARE(failures.size(), 0);
         client.close();
+    }
+
+    void megaRacVirtualMediaReadsAndDetaches()
+    {
+        const auto load = [](const QString& name)
+        {
+            QFile file(":/tls/tests/certificates/" + name);
+            file.open(QIODevice::ReadOnly);
+            return file.readAll();
+        };
+        auto tls = QSslConfiguration::defaultConfiguration();
+        tls.setLocalCertificateChain(
+            {QSslCertificate(load("leaf.pem")),
+             QSslCertificate(load("issuer.pem"))});
+        tls.setPrivateKey(QSslKey(load("leaf.key"), QSsl::Rsa));
+        tls.setPeerVerifyMode(QSslSocket::VerifyNone);
+        QWebSocketServer server("media fixture", QWebSocketServer::SecureMode);
+        server.setSslConfiguration(tls);
+        server.setSupportedSubprotocols({"binary"});
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        QFile image(directory.filePath("fixture.iso"));
+        const QByteArray sector(2048, 'V');
+        QVERIFY(image.open(QIODevice::WriteOnly));
+        QCOMPARE(image.write(sector), sector.size());
+        image.close();
+        auto endpoint = server.serverUrl();
+        endpoint.setHost("localhost");
+        QNetworkRequest request(endpoint);
+        auto clientTls = QSslConfiguration::defaultConfiguration();
+        clientTls.setCaCertificates({QSslCertificate(load("root.pem"))});
+        clientTls.setPeerVerifyMode(QSslSocket::VerifyPeer);
+        request.setSslConfiguration(clientTls);
+
+        QList<QByteArray> messages;
+        std::unique_ptr<QWebSocket> peer;
+        connect(
+            &server,
+            &QWebSocketServer::newConnection,
+            &server,
+            [&]
+            {
+                peer.reset(server.nextPendingConnection());
+                connect(
+                    peer.get(),
+                    &QWebSocket::binaryMessageReceived,
+                    &server,
+                    [&](const QByteArray& message)
+                    { messages.append(message); });
+            });
+        Media media;
+        media.mountMegaRac(request, "media-fixture-token", image.fileName());
+        QTRY_VERIFY(peer);
+        QCOMPARE(peer->subprotocol(), QString("binary"));
+        QTRY_COMPARE(messages.size(), 2);
+        const auto auth = messages.takeFirst();
+        QCOMPARE(quint8(auth[41]), 0xf2U);
+        QCOMPARE(auth.mid(63, 19), QByteArray("media-fixture-token"));
+        const auto info = messages.takeFirst();
+        QCOMPARE(quint8(info[41]), 0xf8U);
+        QVERIFY(info.mid(66).startsWith("fixture.iso"));
+
+        const auto packet = [](quint8 opcode, qsizetype size)
+        {
+            QByteArray bytes(size, 0);
+            bytes.replace(0, 8, "IUSB    ");
+            bytes[8] = 1;
+            bytes[10] = 32;
+            bytes[23] = 2;
+            bytes[41] = char(opcode);
+            qToLittleEndian(quint32(size - 32), bytes.data() + 12);
+            return bytes;
+        };
+        auto ack = packet(0xf1, 63);
+        ack[8] = ack[10] = 0;
+        ack[62] = 1;
+        peer->sendBinaryMessage(ack.first(20));
+        peer->sendBinaryMessage(ack.sliced(20));
+        QTRY_VERIFY(media.status().startsWith("Mounted:"));
+
+        peer->sendBinaryMessage(packet(0x25, 61));
+        QTRY_COMPARE(messages.size(), 1);
+        auto capacity = messages.takeFirst();
+        QCOMPARE(capacity.sliced(61), QByteArray::fromHex("0000000000000800"));
+
+        auto read = packet(0xa8, 61);
+        qToLittleEndian(quint32(42), read.data() + 36);
+        read[47] = 1;   // AMI READ(12) uses a little-endian sector count.
+        peer->sendBinaryMessage(read);
+        QTRY_COMPARE(messages.size(), 1);
+        const auto response = messages.takeFirst();
+        QCOMPARE(qFromLittleEndian<quint32>(response.constData() + 36), 42U);
+        QCOMPARE(quint8(response[53]), 0U);
+        QCOMPARE(qFromLittleEndian<quint32>(response.constData() + 57), 2048U);
+        QCOMPARE(response.sliced(61), sector);
+
+        media.unmount();
+        QTRY_COMPARE(messages.size(), 1);
+        const auto detach = messages.takeFirst();
+        QCOMPARE(quint8(detach[41]), 0xf7U);
+        QCOMPARE(quint8(detach[23]), 2U);
+        peer->close();
+        QTRY_VERIFY(!media.busy());
     }
 
     void concurrentSessionsRecoverStalledVideo()

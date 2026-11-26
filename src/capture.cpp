@@ -231,6 +231,20 @@ int main(int argc, char** argv)
         };
         auto attach = [&]
         {
+            if (endpoint.host.isEmpty() && !session.atenControls()) {
+                if (parser.isSet("vmedia-host") ||
+                    parser.isSet("vmedia-port") || parser.isSet("vmedia-plain"))
+                {
+                    std::cerr << "MegaRAC virtual media uses the console HTTPS "
+                                 "endpoint\n";
+                    finish(1);
+                    return;
+                }
+                started = true;
+                session.setKeepMedia(true);
+                session.mountMedia(media, parser.value("mount-iso"));
+                return;
+            }
             auto mediaEndpoint =
                 endpoint.host.isEmpty() ? session.mediaEndpoint() : endpoint;
             if (parser.isSet("vmedia-host")) {
@@ -274,8 +288,8 @@ int main(int argc, char** argv)
                 if (finishing) {
                     return;
                 }
-                if (session.connected() && mount && !started) {
-                    if (!session.atenControls()) {
+                if (session.powerControls() && mount && !started) {
+                    if (!session.mediaControls()) {
                         std::cerr << "Virtual media is unavailable for this "
                                      "console\n";
                         finish(1);

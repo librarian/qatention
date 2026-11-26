@@ -5,6 +5,7 @@
 
 #include <QElapsedTimer>
 #include <QNetworkAccessManager>
+#include <QNetworkRequest>
 #include <QObject>
 #include <QPointer>
 #include <QSet>
@@ -16,6 +17,7 @@
 
 namespace aten {
 class MegaRac;
+class Media;
 
 class Session: public QObject
 {
@@ -23,6 +25,8 @@ class Session: public QObject
     Q_PROPERTY(bool busy READ busy NOTIFY stateChanged)
     Q_PROPERTY(bool connected READ connected NOTIFY stateChanged)
     Q_PROPERTY(bool atenControls READ atenControls NOTIFY stateChanged)
+    Q_PROPERTY(bool powerControls READ powerControls NOTIFY stateChanged)
+    Q_PROPERTY(bool mediaControls READ mediaControls NOTIFY stateChanged)
     Q_PROPERTY(QString status READ status NOTIFY stateChanged)
 public:
     explicit Session(QObject* parent = nullptr);
@@ -48,6 +52,11 @@ public:
     {
         return connected() && !megaRac;
     }
+
+    bool powerControls() const;
+    bool mediaControls() const;
+    void mountMedia(Media& media, const QString& path);
+    void probeMedia(Media& media);
 
     QString status() const
     {
@@ -103,6 +112,7 @@ signals:
         const QSslCertificate& certificate);
     void videoPacket(const QByteArray& packet, quint32 encoding);
     void diagnostic(const QString& message);
+    void powerResult(const QString& message);
     void unsupportedFrame(const QByteArray& packet);
     void stateChanged();
     void frameReady(const QImage& image);
@@ -132,7 +142,8 @@ private:
     QPointer<QNetworkReply> reply;
     QPointer<QObject> issuerFetch;
     MegaRac* megaRac = nullptr;
-    QByteArray megaRacCsrf;
+    QByteArray megaRacCsrf, megaRacMediaToken;
+    QNetworkRequest megaRacMediaRequest;
     QNetworkAccessManager web;
     QTimer deadline, heartbeat, nextFrame, retry;
     QVariantMap reconnectOptions, consoleTrust;

@@ -49,7 +49,7 @@ add_library(qatention_core STATIC
     src/core/certificatechain.cpp src/core/certificatechain.h
     src/core/nsshttp.cpp src/core/nsshttp.h src/core/nssheaders.h
     src/core/debuglog.cpp src/core/debuglog.h
-    src/core/media.cpp src/core/media.h
+    src/core/media.cpp src/core/media.h src/core/megaracmedia.cpp
     src/core/mediaprotocol.cpp src/core/mediaprotocol.h
     src/core/scsi.cpp src/core/scsi.h
     src/core/videotrace.cpp src/core/videotrace.h)
