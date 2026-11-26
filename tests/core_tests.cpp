@@ -751,16 +751,31 @@ private slots:
         clientTls.setPeerVerifyMode(QSslSocket::VerifyPeer);
         request.setSslConfiguration(clientTls);
 
+        QList<QByteArray> messages;
+        std::unique_ptr<QWebSocket> peer;
+        connect(
+            &server,
+            &QWebSocketServer::newConnection,
+            &server,
+            [&]
+            {
+                peer.reset(server.nextPendingConnection());
+                connect(
+                    peer.get(),
+                    &QWebSocket::binaryMessageReceived,
+                    &server,
+                    [&](const QByteArray& message)
+                    { messages.append(message); });
+            });
         Media media;
         media.mountMegaRac(request, "media-fixture-token", image.fileName());
-        QTRY_VERIFY(server.hasPendingConnections());
-        std::unique_ptr<QWebSocket> peer(server.nextPendingConnection());
-        QSignalSpy messages(peer.get(), &QWebSocket::binaryMessageReceived);
+        QTRY_VERIFY(peer);
+        QCOMPARE(peer->subprotocol(), QString("binary"));
         QTRY_COMPARE(messages.size(), 2);
-        const auto auth = messages.takeFirst().first().toByteArray();
+        const auto auth = messages.takeFirst();
         QCOMPARE(quint8(auth[41]), 0xf2U);
         QCOMPARE(auth.mid(63, 19), QByteArray("media-fixture-token"));
-        const auto info = messages.takeFirst().first().toByteArray();
+        const auto info = messages.takeFirst();
         QCOMPARE(quint8(info[41]), 0xf8U);
         QVERIFY(info.mid(66).startsWith("fixture.iso"));
 
@@ -784,7 +799,7 @@ private slots:
 
         peer->sendBinaryMessage(packet(0x25, 61));
         QTRY_COMPARE(messages.size(), 1);
-        auto capacity = messages.takeFirst().first().toByteArray();
+        auto capacity = messages.takeFirst();
         QCOMPARE(capacity.sliced(61), QByteArray::fromHex("0000000000000800"));
 
         auto read = packet(0xa8, 61);
@@ -792,7 +807,7 @@ private slots:
         read[47] = 1;   // AMI READ(12) uses a little-endian sector count.
         peer->sendBinaryMessage(read);
         QTRY_COMPARE(messages.size(), 1);
-        const auto response = messages.takeFirst().first().toByteArray();
+        const auto response = messages.takeFirst();
         QCOMPARE(qFromLittleEndian<quint32>(response.constData() + 36), 42U);
         QCOMPARE(quint8(response[53]), 0U);
         QCOMPARE(qFromLittleEndian<quint32>(response.constData() + 57), 2048U);
@@ -800,7 +815,7 @@ private slots:
 
         media.unmount();
         QTRY_COMPARE(messages.size(), 1);
-        const auto detach = messages.takeFirst().first().toByteArray();
+        const auto detach = messages.takeFirst();
         QCOMPARE(quint8(detach[41]), 0xf7U);
         QCOMPARE(quint8(detach[23]), 2U);
         peer->close();
